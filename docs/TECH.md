@@ -692,6 +692,50 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 7. 检查 `package.json.license` / `extension.json.license` 与 `LICENSE` 头一致。
 8. 协议自检：`scripts/check-license.mjs`。
 
+### 10.4 EDA API 使用审计（v1.1 复核）
+
+以下为逐条对照 `@jlceda/pro-api-types` 与 easyeda-api skill 参考手册后的结论。
+
+**已核实正确：**
+
+| 调用 | 核对结果 |
+|---|---|
+| `sys_IFrame.openIFrame(html, w, h, id, props)` | ✅ 签名与 `props` 字段一致（无 `x`/`y`，标题取自 HTML `<title>`） |
+| `sys_IFrame.closeIFrame(id?)` | ✅ |
+| `sys_IFrame.isIFrameAlreadyExist(id)` | ✅ 存在于类型定义（skill 参考手册漏列，但 pro-api-types 有） |
+| `sys_Storage.getExtensionUserConfig(k)` | ✅ 同步返回 |
+| `sys_Storage.setExtensionUserConfig(k, v)` | ✅ 返回 `Promise<boolean>` |
+| `sys_Message.showToastMessage(msg, type?, timer?)` | ✅ |
+| `sys_Dialog.showInformationMessage(content, title?, btn?)` | ✅ |
+| `dmt_SelectControl.getCurrentDocumentInfo()` | ✅ |
+| `EDMT_EditorDocumentType` | ✅ PCB=3 / SCHEMATIC_PAGE=1 / FOOTPRINT=4 |
+| `EPCB_LayerId` | ✅ 全部取值核对无误（见 `LAYER` 常量） |
+| `PCB_PrimitiveLine.create` | ✅ 8 参数，`net, layer, x1, y1, x2, y2, lineWidth?, locked?` |
+| `PCB_PrimitivePolyline.create` | ✅ 需要 `IPCB_Polygon` 对象，非裸点数组 |
+| `PCB_PrimitiveArc.create` | ✅ 两端点 + `arcAngle` + `interactiveMode?` |
+| `PCB_PrimitiveString.create` | ✅ 13 参数，`layer` 在首位 |
+| `PCB_MathPolygon.createPolygon` | ✅ |
+| `SCH_PrimitiveWire/Circle/Arc/Text/Polygon.create` | ✅ 全部一致 |
+
+**本次审计发现并修复的错误：**
+
+| 问题 | 原写法 | 修正 |
+|---|---|---|
+| 文本对齐枚举无 `0` 值 | `STRING_ALIGN_LEFT = 0` | `LEFT_BOTTOM = 3`（枚举从 1 开始；3 与 DWG 文本左下基点一致） |
+| 多边形源数组顺序错误 | `['L', x1, y1, x2, y2, ...]` | `[x1, y1, 'L', x2, y2, ...]`——**首坐标点在 `'L'` 之前** |
+| 多段线未闭合 | 直接输出原点列 | 闭合时补回首点，保证单多边形首尾重合 |
+| `PCB_PrimitiveRegion.create` 参数类型 | 写成 `IPCB_ComplexPolygon` | 实为 `IPCB_Polygon`（本项目未使用 Region，仅修正类型） |
+| `OpenIFrameProps` 含不存在的 `x`/`y` | 有 | 移除 |
+| `DEFAULT_FONT` | `'Arial'` | `'default'`（与官方示例一致） |
+
+**待运行时确认（无法静态验证）：**
+
+1. `PCB_PrimitiveArc` 的 `arcAngle` 正负号是否与 DWG 逆时针为正一致（DWG 逆时针为正，EDA 负值表示顺时针，代码已按此换算）。
+2. 图元目标层合法性：`TPCB_LayersOfLine` 允许 BoardOutline/Document/Mechanical/Silk 等；
+   但 `TPCB_LayersOfRegion` **仅允许铜层与 MULTI**。本项目统一用 Polyline 输出，
+   未使用 Region，故不受该限制影响。
+3. `PCB_PrimitiveString` 的 `fontSize` 与 DWG 文本高度的比例（当前取 0.8，需实测微调）。
+
 ---
 
 ## 11. ADR 摘要（关键决策记录）

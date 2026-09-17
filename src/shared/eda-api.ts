@@ -24,7 +24,7 @@ export interface PcbComplexPolygonLike {
 	readonly __pcbComplexPolygon: unique symbol;
 }
 
-/** 打开内联框架的额外参数。 */
+/** 打开内联框架的额外参数（对照 SYS_IFrame.openIFrame 的 props 核实：无 x/y）。 */
 export interface OpenIFrameProps {
 	maximizeButton?: boolean;
 	minimizeButton?: boolean;
@@ -33,8 +33,6 @@ export interface OpenIFrameProps {
 	onBeforeCloseCallFn?: () => boolean | undefined | Promise<boolean | undefined>;
 	grayscaleMask?: boolean;
 	title?: string;
-	x?: number;
-	y?: number;
 }
 
 /** 完整的 eda 全局对象形状（最小子集，按需扩展）。 */
@@ -67,9 +65,12 @@ export interface EdaGlobals {
 		text?: (key: string, ...args: unknown[]) => string;
 	};
 	sys_Storage?: {
-		/** 同步读取。 */
+		/** 同步读取；不存在返回 undefined。 */
 		getExtensionUserConfig?: (key: string) => unknown;
 		setExtensionUserConfig?: (key: string, value: unknown) => Promise<boolean>;
+		deleteExtensionUserConfig?: (key: string) => Promise<boolean>;
+		getExtensionAllUserConfigs?: () => Record<string, unknown>;
+		setExtensionAllUserConfigs?: (configs: Record<string, unknown>) => Promise<boolean>;
 		clearExtensionAllUserConfigs?: () => Promise<boolean>;
 	};
 	sys_Environment?: {
@@ -119,8 +120,8 @@ export interface EdaGlobals {
 	pcb_PrimitiveRegion?: {
 		create?: (
 			layer: number,
-			complexPolygon: PcbComplexPolygonLike,
-			ruleType?: Array<string>,
+			complexPolygon: PcbPolygonLike,
+			ruleType?: Array<number>,
 			regionName?: string,
 			lineWidth?: number,
 			primitiveLock?: boolean,

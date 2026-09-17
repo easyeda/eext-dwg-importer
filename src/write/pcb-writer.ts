@@ -28,9 +28,15 @@ import { edaApi } from '../shared/eda-api';
 import { dwgToMil, radToDeg } from '../shared/units';
 
 const BATCH = 50;
-/** EPCB_PrimitiveStringAlignMode：左对齐。 */
-const STRING_ALIGN_LEFT = 0;
-const DEFAULT_FONT = 'Arial';
+/**
+ * EPCB_PrimitiveStringAlignMode：文本对齐模式（枚举从 1 开始，没有 0）。
+ * 取值：LEFT_TOP=1, LEFT_MIDDLE=2, LEFT_BOTTOM=3, CENTER_TOP=4, CENTER=5,
+ *       CENTER_BOTTOM=6, RIGHT_TOP=7, RIGHT_MIDDLE=8, RIGHT_BOTTOM=9。
+ * 这里用 LEFT_BOTTOM(3)，与 DWG 文本基点在左下一致。
+ */
+const STRING_ALIGN_LEFT_BOTTOM = 3;
+/** 官方示例使用的默认字体名。 */
+const DEFAULT_FONT = 'default';
 
 export async function applyPcbImport(
 	payload: ApplyImportPayload,
@@ -80,12 +86,23 @@ async function writeOne(e: DwgEntity, ctx: WriteContext, result: ApplyImportResu
 		return;
 
 	const X = (v: number): number => dwgToMil(v, ctx.units);
-	const mkPolygon = (points: Array<{ x: number; y: number }>): PcbPolygonSource | undefined => {
+	/**
+	 * 构造单多边形源数组。
+	 *
+	 * 格式（对照 TPCB_PolygonSourceArray 核实）：`x1 y1 L x2 y2 x3 y3 ...`
+	 * 注意**首个坐标点在 'L' 之前**，不是 marker 打头。
+	 * 单多边形要求首尾重合，未闭合时会被自动闭合，故这里显式补回首点。
+	 */
+	const mkPolygon = (points: Array<{ x: number; y: number }>, closed: boolean): PcbPolygonSource | undefined => {
 		if (points.length < 2)
 			return undefined;
-		const src: PcbPolygonSource = ['L'];
-		for (const p of points) {
-			src.push(X(p.x), X(p.y));
+		const first = points[0]!;
+		const last = points[points.length - 1]!;
+		const needClose = closed && (first.x !== last.x || first.y !== last.y);
+		const seq = needClose ? [...points, first] : points;
+		const src: PcbPolygonSource = [X(seq[0]!.x), X(seq[0]!.y), 'L'];
+		for (let i = 1; i < seq.length; i++) {
+			src.push(X(seq[i]!.x), X(seq[i]!.y));
 		}
 		return src;
 	};
@@ -132,10 +149,12 @@ async function writeOne(e: DwgEntity, ctx: WriteContext, result: ApplyImportResu
 			case 'LWPOLYLINE':
 			case 'POLYLINE':
 			case 'SPLINE': {
-				const pts = e.kind === 'CIRCLE'
+				const isCircle = e.kind === 'CIRCLE';
+				const pts = isCircle
 					? circlePoints(e.center, e.radius, 64)
 					: e.points;
-				const src = mkPolygon(pts);
+				// 圆与闭合多段线都要补回首点，保证多边形首尾重合。
+				const src = mkPolygon(pts, isCircle || e.closed);
 				if (!src)
 					break;
 				const polygon = eda.pcb_MathPolygon?.createPolygon?.(src);
@@ -156,7 +175,7 @@ async function writeOne(e: DwgEntity, ctx: WriteContext, result: ApplyImportResu
 					// EDA 的 font 尺寸语义与 DWG 文本高度不同，取 0.8 系数做视觉对齐。
 					Math.max(1, X(e.height) * 0.8),
 					ctx.width,
-					STRING_ALIGN_LEFT,
+					STRING_ALIGN_LEFT_BOTTOM,
 					radToDeg(e.rotation),
 					false,
 					0,
@@ -185,7 +204,6 @@ function circlePoints(center: { x: number; y: number }, radius: number, segments
 	for (let i = 0; i < segments; i++) {
 		pts.push(pointOnCircle(center, radius, (i / segments) * Math.PI * 2));
 	}
-	// 闭合
-	pts.push(pts[0]!);
+	// 不在此处补首点：闭合由 mkPolygon 统一处理，避免重复。
 	return pts;
 }
