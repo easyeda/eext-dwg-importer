@@ -3,9 +3,14 @@
  *
  * 本文件为 pro-api-sdk 默认扩展入口；headerMenus 中的 registerFn 通过 export 函数名解析。
  *
- * 菜单注册逻辑写在 extension.json；运行时初始化（如有）写在 activate()。
+ * 注意：官方要求 registerFn 对应的方法「使用 export 将指定方法作为 ES Module 导出」。
+ * 这里刻意使用**函数声明式导出**（export function foo()），而不是
+ * `export { foo } from './x'` 这种 re-export 形式——后者在部分加载器下
+ * 不会被视为本模块的具名导出，可能导致点击菜单无反应。
  */
 import extensionConfig from '../extension.json' with { type: 'json' };
+
+import { importDwg } from './internal/import-dwg';
 
 // eslint-disable-next-line unused-imports/no-unused-vars
 export function activate(status?: 'onStartupFinished', arg?: string): void {
@@ -20,4 +25,17 @@ export function about(): void {
 	);
 }
 
-export { importDwgFootprint, importDwgPcb, importDwgSch } from './menu';
+/** PCB 编辑器菜单入口。 */
+export function importDwgPcb(): Promise<void> {
+	return importDwg('PCB');
+}
+
+/** 原理图编辑器菜单入口。 */
+export function importDwgSch(): Promise<void> {
+	return importDwg('SCH');
+}
+
+/** 封装编辑器菜单入口。 */
+export function importDwgFootprint(): Promise<void> {
+	return importDwg('FOOTPRINT');
+}

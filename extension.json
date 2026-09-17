@@ -41,13 +41,13 @@
 				]
 			}
 		],
-		"schematic": [
+		"sch": [
 			{
-				"id": "dwg-importer.schematic",
+				"id": "dwg-importer.sch",
 				"title": "DWG Importer",
 				"menuItems": [
 					{
-						"id": "dwg-importer.schematic.import",
+						"id": "dwg-importer.sch.import",
 						"title": "导入 DWG…",
 						"registerFn": "importDwgSch"
 					}

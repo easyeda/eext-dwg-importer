@@ -48,9 +48,19 @@ export async function importDwg(documentType: ImportDocumentType): Promise<void>
 		return;
 	}
 
-	// 用真实文档类型覆盖菜单传入值：两者不一致时以当前文档为准。
+	/*
+	 * 文档类型以「菜单传入值」为准。
+	 *
+	 * 菜单已按编辑器环境分组（pcb / sch / footprint），传入值与当前环境必然一致；
+	 * 而 getCurrentDocumentInfo() 依赖「最后获得输入焦点的文档」，分屏或焦点异常时
+	 * 可能返回其它文档。若让它反向覆盖菜单值，会出现「在封装编辑器里却按 PCB 导入」。
+	 * 这里只用探测结果补记日志，便于排查环境不一致。
+	 */
+	const effective = documentType;
 	const detected = await detectDocumentType();
-	const effective = detected ?? documentType;
+	if (detected && detected !== effective) {
+		eda?.sys_Log?.warn?.(`[DwgImporter] 菜单=${effective}，焦点文档=${detected}，按菜单值处理`);
+	}
 
 	try {
 		// 重复点击时先关掉旧窗口，避免出现多个弹窗。
