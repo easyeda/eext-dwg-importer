@@ -696,16 +696,30 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 ### 9.9 EDA 对话框容器的 id 选择器缺陷
 
 EDA 会把 iframe 弹窗容器 id 生成为 `<extensionUuid>.<iframeId>`
-（实测 DOM：`5d5d79bf5dd44287817ae29f79a2e9e4.dwg-importer-window`），
-并在 `ae.open` 内部用 `querySelector('#<uuid>.<id> ...')` 定位。
+（实测 DOM：`<uuid>.dwg-importer-window`），
+并在 `ae.open` 内部用 `querySelector('#<uuid>.<id> ...')` 定位该容器。
 
 由于 CSS 选择器中 `#` 后**不能以数字开头**，当扩展 uuid 以数字开头时，
 该选择器必然抛 `SyntaxError: ... is not a valid selector`。
 
-- 实测：`#5d5d79bf...` → 抛错；`#a5d5d79bf...` → 正常。
+- 实测：`#5d5d79bf...` → 抛错；`#a5d5d79bf...` → 正常；
+  无 uuid 前缀的 `#dwg-importer-window` → 正常。
 - 该异常发生在 `setTimeout` 回调内，**`openIFrame` 仍返回成功，弹窗功能不受影响**，
-  属于 EDA 侧的噪声报错，扩展侧无法规避（换任何 `iframeId` 都无用，前缀恒定）。
-- 排查时不要被它误导：它**不是**「解析失败」的原因。
+  属于 EDA 侧的噪声报错。
+- 排查时不要被它误导：它**不是**「解析失败」的原因，两者互不相干。
+
+**规避方式：扩展 uuid 以字母开头。**
+
+`iframeId` 换成什么都无用（uuid 前缀由 EDA 恒定添加），唯一可控的变量是 uuid 本身。
+本扩展的 uuid 因此固定为以字母 `d` 开头的值，**请勿改为数字开头**。
+
+> **更换 uuid 的副作用**：EDA 按 uuid 区分扩展，换 uuid 等于换了一个新扩展。
+> 需要先卸载旧版再安装，扩展的用户配置（`sys_Storage`）也不会继承。
+>
+> 另注意 `build/utils.ts` 的 `fixUuid()` 生成分支用
+> `crypto.randomUUID()`，其首字符有 5/8 概率是数字。
+> 若该分支被触发（uuid 格式非法时），可能生成数字开头的 uuid 而重新引入本缺陷，
+> 届时需手工确认 `extension.json` 的 uuid。
 
 ### 9.6 libredwg-bab 是否随包体积超 1.2 MB
 
