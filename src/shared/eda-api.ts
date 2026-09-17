@@ -37,6 +37,8 @@ export interface OpenIFrameProps {
 
 /** 完整的 eda 全局对象形状（最小子集，按需扩展）。 */
 export interface EdaGlobals {
+	/** 当前执行上下文所属扩展的 UUID（实测存在，用于日志排查）。 */
+	extensionUuid?: string;
 	sys_IFrame?: {
 		/** 打开内联框架。htmlFileName 为扩展包内路径（如 '/iframe/index.html'）。 */
 		openIFrame?: (

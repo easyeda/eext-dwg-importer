@@ -12,6 +12,32 @@ import extensionConfig from '../extension.json' with { type: 'json' };
 
 import { importDwg } from './internal/import-dwg';
 
+const TAG = '[DwgImporter]';
+
+/**
+ * 入口级日志：用于把「菜单回调没触发」与「触发了但内部失败」区分开。
+ *
+ * 若点击菜单后连这条都看不到，说明问题在 extension.json 菜单注册或
+ * registerFn 名称解析，与导入逻辑无关。
+ */
+function entryLog(fnName: string, documentType: string): void {
+	const eda = (globalThis as unknown as {
+		eda?: {
+			sys_Log?: { info?: (m: string) => void };
+			sys_Message?: { showToastMessage?: (m: string, t?: unknown, d?: number) => void };
+		};
+	}).eda;
+	const line = `${TAG} ${fnName}() 被调用 (documentType=${documentType})`;
+	try {
+		eda?.sys_Log?.info?.(line);
+	}
+	catch { /* ignore */ }
+	try {
+		eda?.sys_Message?.showToastMessage?.(line, undefined, 3000);
+	}
+	catch { /* ignore */ }
+}
+
 // eslint-disable-next-line unused-imports/no-unused-vars
 export function activate(status?: 'onStartupFinished', arg?: string): void {
 	// 静态菜单注册已在 extension.json 中完成；此处可留作未来运行时初始化。
@@ -27,15 +53,18 @@ export function about(): void {
 
 /** PCB 编辑器菜单入口。 */
 export function importDwgPcb(): Promise<void> {
+	entryLog('importDwgPcb', 'PCB');
 	return importDwg('PCB');
 }
 
 /** 原理图编辑器菜单入口。 */
 export function importDwgSch(): Promise<void> {
+	entryLog('importDwgSch', 'SCH');
 	return importDwg('SCH');
 }
 
 /** 封装编辑器菜单入口。 */
 export function importDwgFootprint(): Promise<void> {
+	entryLog('importDwgFootprint', 'FOOTPRINT');
 	return importDwg('FOOTPRINT');
 }
