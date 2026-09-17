@@ -1,0 +1,43 @@
+{
+	"name": "dwg-importer",
+	"uuid": "",
+	"displayName": "直接导入DWG格式到PCB",
+	"description": "",
+	"version": "1.0.0",
+	"publisher": "",
+	"engines": {
+		"eda": "^3.2.0"
+	},
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "extension-store",
+		"url": ""
+	},
+	"categories": "Other",
+	"keywords": [
+		"DWG"
+	],
+	"images": {
+		"logo": "./images/logo.png"
+	},
+	"homepage": "https://github.com/easyeda/eext-dwg-importer",
+	"bugs": "https://github.com/easyeda/eext-dwg-importer/issues",
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+		"pcb": [
+			{
+				"id": "menuId3",
+				"title": "Ext Menu",
+				"menuItems": [
+					{
+						"id": "About",
+						"title": "About...",
+						"registerFn": "about"
+					}
+				]
+			}
+		]
+	}
+}
