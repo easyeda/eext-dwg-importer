@@ -21,6 +21,7 @@ import { applyFootprintImport, applyPcbImport, applySchImport } from '../write/i
 import { parseDwg } from './dwg/parser';
 import { createStateMachine } from './state-machine';
 import { createIframeStorage } from './storage';
+import { need } from './ui/dom';
 import { createFileSection } from './ui/file-section';
 import { injectStyles } from './ui/inject-styles';
 import { createLayerMapping } from './ui/layer-mapping';
@@ -64,24 +65,6 @@ function domReady(): Promise<void> {
 	});
 }
 
-/**
- * 按 data-role 查找子元素；找不到时抛出带明确信息的错误。
- *
- * 不用 `querySelector(...)!` 的原因：非空断言只在编译期有效，
- * 一旦 HTML 漏写属性，运行时得到 null 后会以
- * 「Cannot read properties of null」的形式中断整个初始化，
- * 弹窗只显示静态骨架，极难定位。这里改为直接点明缺少哪个 data-role。
- *
- * 另：build/iframe.ts 的 assertDataRoles() 会在构建期拦截此类遗漏。
- */
-function need<T extends HTMLElement>(root: ParentNode, role: string): T {
-	const el = root.querySelector<T>(`[data-role="${role}"]`);
-	if (!el) {
-		throw new Error(`弹窗 HTML 缺少 data-role="${role}" 的元素`);
-	}
-	return el;
-}
-
 /** 初始化界面与状态。仅在 DOM 就绪后调用。 */
 function start(): void {
 	const app = document.getElementById('app');
@@ -90,14 +73,11 @@ function start(): void {
 		return;
 	}
 
-	const headerEl = need(app, 'header');
 	const mainEl = need(app, 'main');
 	const footerEl = need(app, 'footer');
 	const importBtn = need<HTMLButtonElement>(footerEl, 'import-btn');
 	const cancelBtn = need<HTMLButtonElement>(footerEl, 'cancel-btn');
-	const contextEl = need(headerEl, 'context');
 
-	need(headerEl, 'title').textContent = t('DWG Importer');
 	cancelBtn.textContent = t('Cancel');
 	importBtn.textContent = t('Import');
 
@@ -119,7 +99,6 @@ function start(): void {
 	async function init(): Promise<void> {
 		currentDocType = storage.getLaunchParams()?.documentType ?? await detectDocumentType() ?? 'PCB';
 		targetLayers = buildLayerList(currentDocType);
-		contextEl.textContent = currentDocType;
 
 		const lastDir = storage.getLastDir();
 		if (lastDir) {

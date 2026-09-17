@@ -55,6 +55,12 @@ async function main(): Promise<void> {
 	else {
 		console.warn('[iframe] vendor/libredwg-web not found — run `npm run sync:vendor` for real DWG parsing');
 	}
+
+	// 3b. 一致性校验：解析引擎资源必须在 HTML 中登记，且指向真实存在的文件。
+	// 对应「JS 内部 import() 拿不到扩展包内资源」的问题：弹窗是 blob URL，
+	// import.meta.url 无法用于相对解析，必须由 HTML 登记后取回 blob URL。
+	// 放在 vendor 拷贝之后，以便同时校验文件确实就位。
+	await assertVendorLinks(htmlSrc);
 }
 
 /**
@@ -62,12 +68,17 @@ async function main(): Promise<void> {
  * 同时校验 import-dwg.ts 里的 IFRAME_HTML 与产物一致。
  */
 async function assertHtmlPaths(htmlPath: string): Promise<void> {
-	const html = await fs.readFile(htmlPath, 'utf-8');
+	const raw = await fs.readFile(htmlPath, 'utf-8');
+	// 先剥离 HTML 注释，避免注释里的示例（如 href="/xxx"）被当成真实引用。
+	const html = raw.replace(/<!--[\s\S]*?-->/g, '');
 	const refs = [...html.matchAll(/(?:src|href)\s*=\s*"(\/[^"]+)"/g)].map(m => m[1]!);
 	if (refs.length === 0) {
 		throw new Error('iframe/index.html 中没有任何绝对路径引用（应以 /dist/iframe/ 开头）');
 	}
 	for (const ref of refs) {
+		// vendor 资源在拷贝之前尚不存在，由后面的 assertVendorLinks() 专门校验。
+		if (ref.startsWith('/dist/vendor/'))
+			continue;
 		// 包内绝对路径 → 仓库内实际文件
 		const onDisk = path.join(ROOT, ref.replace(/^\//, ''));
 		if (!(await fs.pathExists(onDisk))) {
@@ -147,6 +158,52 @@ async function assertDataRoles(htmlPath: string): Promise<void> {
 	}
 
 	console.log(`[iframe] data-role check OK (引用 ${referenced.size} 个，HTML 定义 ${defined.size} 个)`);
+}
+
+/**
+ * 校验解析引擎资源已在 HTML 中登记，且指向真实存在的文件。
+ *
+ * 资源 ID 必须与 src/iframe/dwg/resources.ts 中的 SQL 常量一致。
+ * 校验不通过说明：要么 HTML 漏了 <link>，要么路径写错，
+ * 两种情况都会导致运行时「解析引擎资源缺失」而无法导入 DWG。
+ */
+async function assertVendorLinks(htmlPath: string): Promise<void> {
+	const html = await fs.readFile(htmlPath, 'utf-8');
+	// 资源 id → 期望的包内路径
+	const expected: Array<[string, string]> = [
+		['vendor-libredwg', '/dist/vendor/libredwg-web/dist/libredwg-web.js'],
+		['vendor-libredwg-wasm', '/dist/vendor/libredwg-web/wasm/libredwg-web.wasm'],
+	];
+
+	for (const [id, wantPath] of expected) {
+		// HTML 里需存在 id="<id>" 且 href="<wantPath>" 的 link
+		const re = new RegExp(`<link[^>]*id="${id}"[^>]*href="([^"]+)"`);
+		const m = html.match(re);
+		if (!m) {
+			throw new Error(
+				`iframe/index.html 中缺少资源声明：id="${id}"\n`
+				+ `  期望：<link rel="preload" ... id="${id}" href="${wantPath}" />`,
+			);
+		}
+		if (m[1] !== wantPath) {
+			throw new Error(
+				`资源 id="${id}" 的 href 与预期不符：\n`
+				+ `  HTML 实际：${m[1]}\n`
+				+ `  预期：    ${wantPath}`,
+			);
+		}
+		// 对应文件必须真实存在（构建产物里）
+		const onDisk = path.join(ROOT, wantPath.replace(/^\//, ''));
+		if (!(await fs.pathExists(onDisk))) {
+			throw new Error(
+				`资源文件不存在：${wantPath}\n`
+				+ `  期望位于：${path.relative(ROOT, onDisk)}\n`
+				+ '  提示：先执行 `npm run sync:vendor`，再由 build/iframe.ts 拷贝到 dist/vendor/。',
+			);
+		}
+	}
+
+	console.log(`[iframe] vendor link check OK (${expected.length} 个资源)`);
 }
 
 /** 递归收集目录下的 .ts 文件。 */

@@ -2,24 +2,21 @@
  * DWG 解析入口：加载 libredwg wasm，解析 ArrayBuffer，构造 IR（含 BLOCK 展开）。
  *
  * 底层库：@mlightcad/libredwg-web（GPL-3.0）
- *   const libredwg = await LibreDwg.create('<wasm 目录>/');
+ *   const libredwg = await LibreDwg.create('<wasm 目录>');
  *   const ptr = libredwg.dwg_read_data(buffer, Dwg_File_Type.DWG);
  *   const db  = libredwg.convert(ptr);   // DwgDatabase
  *
- * 设计要点（与 TECH §7 一致）：
- * - wasm 随 eext 打包；目录通过 new URL(..., import.meta.url) 计算。
- * - 失败统一抛 Error，message 包含上下文；调用方负责 UI 呈现。
+ * 资源加载方式见 resources.ts：不能依赖 import.meta.url 做相对解析
+ * （弹窗页面是 blob URL，会抛 Invalid URL），须由 HTML 登记后取回 blob URL。
  *
- * 实现策略：
- * - 优先使用宿主预挂载的全局 `__dwg_libredwg__`（便于测试与 mock）。
- * - 否则动态 import('@mlightcad/libredwg-web')。
- * - 任意失败抛 Error('WASM load failed')。
+ * 失败统一抛 Error，message 含上下文，由调用方在界面上呈现。
  */
 
 import type { DwgIR, DwgPoint } from '../../shared/types';
 import type { RawDwgEntity } from './ir';
 import { buildBlockDefs, expandInserts } from './block-expander';
 import { buildIR, detectUnits } from './ir';
+import { vendorModuleUrl, vendorWasmDir } from './resources';
 
 export interface ParseOptions {
 	onProgress?: (percent: number) => void;
@@ -112,45 +109,39 @@ async function loadModule(): Promise<{ libredwg: LibreDwgLike }> {
 	if (fromGlobal)
 		return { libredwg: fromGlobal };
 
-	// 2. 运行时从 vendor 目录动态 import（esbuild 中标记为 external，见 config/esbuild.iframe.ts）。
-	//    vendor 由 `npm run sync:vendor` + build/iframe.ts 拷贝到 dist/vendor/libredwg-web/。
+	/*
+	 * 2. 从 HTML 登记的 blob URL 动态 import。
+	 *
+	 * 不能用 `new URL('../vendor/...', import.meta.url)`：
+	 * 弹窗页面由 blob URL 承载，import.meta.url 形如 `blob:https://.../uuid`，
+	 * 相对路径解析会抛 `Invalid URL`（已实测）。
+	 * 故改由 index.html 的 <link rel="preload"> 登记、EDA 改写为 blob URL，
+	 * 这里通过 resources.ts 取回。详见 resources.ts 顶部说明。
+	 */
+	let url: string;
+	let wasmDir: string;
 	try {
-		const url = vendorModuleUrl();
-		const mod = (await import(/* @vite-ignore */ url)) as unknown as LibredwgModule;
-		const factory = mod.LibreDwg;
-		if (!factory)
-			throw new Error('LibreDwg export missing');
-		const libredwg = await factory.create(resolveWasmDir());
-		return { libredwg };
+		url = vendorModuleUrl();
+		wasmDir = vendorWasmDir();
 	}
-	catch {
-		throw new Error('WASM load failed');
+	catch (err) {
+		throw new Error(`解析引擎资源缺失：${(err as Error).message}`);
 	}
-}
 
-/** vendor 内 ESM 包装的绝对 URL。 */
-function vendorModuleUrl(): string {
-	return new URL('../vendor/libredwg-web/dist/libredwg-web.js', import.meta.url).href;
-}
-
-let wasmDirOverride: string | undefined;
-
-/** 由宿主/测试注入 wasm 目录（生产环境由 iframe 入口传入 eext 内相对路径）。 */
-export function setWasmDir(dir: string): void {
-	wasmDirOverride = dir;
-}
-
-function resolveWasmDir(): string | undefined {
-	if (wasmDirOverride)
-		return wasmDirOverride;
-	// vendor 内的 wasm 目录：glue 以 `new URL("libredwg-web.wasm", import.meta.url)`
-	// 定位二进制，因此传入该目录（带尾斜杠）。
+	let mod: LibredwgModule;
 	try {
-		return new URL('../vendor/libredwg-web/wasm/', import.meta.url).href;
+		mod = (await import(/* @vite-ignore */ url)) as unknown as LibredwgModule;
 	}
-	catch {
-		return undefined;
+	catch (err) {
+		throw new Error(`加载解析引擎失败：${(err as Error).message}`);
 	}
+
+	const factory = mod.LibreDwg;
+	if (!factory)
+		throw new Error('解析引擎导出异常（缺少 LibreDwg）');
+
+	// create(filepath) 内部会拼成 `${filepath}/${filename}`，故传目录。
+	return { libredwg: await factory.create(wasmDir) };
 }
 
 /** 主解析入口。 */

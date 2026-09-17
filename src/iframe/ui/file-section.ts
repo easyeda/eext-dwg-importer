@@ -3,6 +3,7 @@
  */
 
 import { t } from '../../shared/i18n';
+import { need } from './dom';
 
 export interface FileSection {
 	setStatusIdle: () => void;
@@ -14,21 +15,16 @@ export interface FileSection {
 }
 
 export function createFileSection(root: HTMLElement, onSelect: () => void): FileSection {
-	const drop = root.querySelector<HTMLDivElement>('[data-role="dropzone"]')!;
-	const fileInput = root.querySelector<HTMLInputElement>('[data-role="file-input"]')!;
-	const nameLabel = root.querySelector<HTMLSpanElement>('[data-role="file-name"]')!;
-	const statusLabel = root.querySelector<HTMLSpanElement>('[data-role="status"]')!;
-	const btn = root.querySelector<HTMLButtonElement>('[data-role="select-btn"]')!;
+	const drop = need(root, 'dropzone') as HTMLDivElement;
+	const fileInput = need(root, 'file-input') as HTMLInputElement;
+	const nameLabel = need(root, 'file-name') as HTMLSpanElement;
+	const statusLabel = need(root, 'status') as HTMLSpanElement;
 
-	btn.textContent = t('Select file…');
+	// 拖拽区本身即点击入口（不再单独放「选择文件」按钮）。
 	drop.textContent = t('Drop DWG file here or click to select');
 
 	const handlers: Array<(file: File) => void> = [];
 
-	btn.addEventListener('click', (ev) => {
-		ev.stopPropagation();
-		fileInput.click();
-	});
 	drop.addEventListener('click', () => fileInput.click());
 
 	drop.addEventListener('dragover', (ev) => {

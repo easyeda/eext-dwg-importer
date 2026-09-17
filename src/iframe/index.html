@@ -1,17 +1,33 @@
 <!doctype html>
 <html lang="zh-Hans">
 	<head>
-		<title>DWG Importer</title>
+		<!--
+			页面 title 会被 EDA 取作弹出窗口的原生标题栏文字
+			（见 ui.js 的 getHtmlData：用正则从 title 标签提取）。
+			这里用中文，与扩展显示名保持一致。
+		-->
+		<title>导入 DWG</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+		<!--
+			DWG 解析引擎（@mlightcad/libredwg-web）的运行时资源。
+
+			为什么用 <link> 声明，而不是在 JS 里 import：
+			EDA 在渲染弹窗时会扫描 HTML/CSS 中形如 src|href="/xxx" 的**包内绝对路径**，
+			逐个取文件内容并替换为 blob URL（见 ui.js 的 changeLabelAddress）。
+			但 JS 内部的 import() / fetch() **不会**被这样处理，
+			而 iframe 页面本身是 blob URL，用相对路径解析会抛 Invalid URL。
+
+			因此这里用 rel="preload"（浏览器只预载、不执行）把两个资源"登记"进 DOM，
+			使 EDA 完成 blob URL 改写；运行时再由 resources.ts 从 DOM 取回对应的
+			blob URL 交给解析器。顺序不能调换：link 必须先于 script。
+		-->
+		<link rel="preload" as="script" id="vendor-libredwg" href="/dist/vendor/libredwg-web/dist/libredwg-web.js" />
+		<link rel="preload" as="fetch" id="vendor-libredwg-wasm" href="/dist/vendor/libredwg-web/wasm/libredwg-web.wasm" />
 	</head>
 	<body>
 		<div id="app" class="app">
-			<header data-role="header" class="app-header">
-				<div data-role="title" class="app-title">DWG Importer</div>
-				<div data-role="context" class="app-context"></div>
-			</header>
-
 			<main data-role="main" class="app-main">
 				<section data-role="file-section" class="card">
 					<div data-role="dropzone" class="dropzone"></div>
@@ -20,7 +36,6 @@
 						<span data-role="file-name"></span>
 						<span data-role="status"></span>
 					</div>
-					<button data-role="select-btn" class="btn"></button>
 				</section>
 
 				<section data-role="layer-mapping-section" class="card">
