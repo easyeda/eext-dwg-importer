@@ -66,6 +66,14 @@ export async function importDwg(documentType: ImportDocumentType): Promise<void>
 		await eda?.sys_Storage?.setExtensionUserConfig?.(KEY_LAUNCH, { documentType });
 
 		const opened = await iframeApi.openIFrame(IFRAME_HTML, 760, 660, IFRAME_ID, {
+			/*
+			 * 标题用 sys_I18n.text() 翻译后传入。
+			 *
+			 * EDA 决定窗口标题的优先级是 props.title > HTML 的 title 标签
+			 * （见 ui.js：ae.open({ title: props.title || htmlTitle })）。
+			 * HTML 里的 title 只能写死一种语言，故这里显式传翻译后的标题。
+			 */
+			title: eda?.sys_I18n?.text?.('Import DWG') ?? 'Import DWG',
 			maximizeButton: false,
 			minimizeButton: false,
 			grayscaleMask: false,

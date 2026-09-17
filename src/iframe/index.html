@@ -2,11 +2,12 @@
 <html lang="zh-Hans">
 	<head>
 		<!--
-			页面 title 会被 EDA 取作弹出窗口的原生标题栏文字
-			（见 ui.js 的 getHtmlData：用正则从 title 标签提取）。
-			这里用中文，与扩展显示名保持一致。
+			title 标签仅作兜底：EDA 决定窗口标题的优先级是
+			openIFrame 的 props.title > 本标签（见 ui.js）。
+			实际标题由 import-dwg.ts 用 sys_I18n.text() 翻译后经 props.title 传入，
+			故此处固定写英文，不作为多语言入口。
 		-->
-		<title>导入 DWG</title>
+		<title>Import DWG</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 

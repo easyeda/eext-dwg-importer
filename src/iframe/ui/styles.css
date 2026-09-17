@@ -66,28 +66,6 @@ body {
 	flex: 1;
 }
 
-.app-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 12px 16px;
-	border-bottom: 1px solid var(--border);
-	background: var(--bg-secondary);
-}
-
-.app-title {
-	font-weight: 600;
-	font-size: 15px;
-}
-
-.app-context {
-	color: var(--text-secondary);
-	font-size: 12px;
-	padding: 2px 8px;
-	border-radius: 12px;
-	background: var(--bg-tertiary);
-}
-
 .app-main {
 	flex: 1;
 	overflow-y: auto;
