@@ -39,6 +39,12 @@ const NAME_RULES: Array<{ pattern: RegExp; layerId: number }> = [
 	{ pattern: /^(mechanical|mech([_-]?\d+)?)$/i, layerId: PCB_LAYER_ID.Mechanical },
 	{ pattern: /^(top|toplayer|signal[_-]?top|copper[_-]?top)$/i, layerId: PCB_LAYER_ID.TopLayer },
 	{ pattern: /^(bot(tom)?|botlayer|signal[_-]?bot(tom)?|copper[_-]?bot(tom)?)$/i, layerId: PCB_LAYER_ID.BottomLayer },
+	/*
+	 * `0` 是 DWG 的默认图层，承载绝大多数几何。
+	 * 它没有语义信息，但若不给出建议，用户打开弹窗后每一层都要手动指定，
+	 * 而实际使用中「0 层 → 顶层铜箔」是最常见的诉求，故作为兜底规则放最后。
+	 */
+	{ pattern: /^0$/, layerId: PCB_LAYER_ID.TopLayer },
 ];
 
 /** ACI 颜色 → 0..255 RGB。ACI 0/256 = byblock，1..255 是索引。 */

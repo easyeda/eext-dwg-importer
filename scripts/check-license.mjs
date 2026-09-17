@@ -86,12 +86,17 @@ else {
 	}
 }
 
-// 4. vendor/libredwg-web 三件套（未同步则告警）
+/*
+ * 4. vendor/libredwg-web 产物齐全（未同步则告警）。
+ *
+ * 注意：sync-vendor.mjs 会把上游的「包装层 + wasm 胶水层」合并成**单个自包含 ESM**，
+ * 因为运行时经 blob URL 加载，相对 import 无法解析（详见该脚本头部说明）。
+ * 故这里校验的是合并后的两件套，而不是上游原始的 dist/ + wasm/ 三件套。
+ */
 const VENDOR = join(ROOT, 'vendor', 'libredwg-web');
 const VENDOR_FILES = [
-	'dist/libredwg-web.js',
-	'wasm/libredwg-web.js',
-	'wasm/libredwg-web.wasm',
+	'libredwg-web.js',
+	'libredwg-web.wasm',
 ];
 if (!existsSync(VENDOR)) {
 	warn('vendor/libredwg-web not found (run `npm run sync:vendor`)');
@@ -102,7 +107,7 @@ else {
 		fail(`vendor/libredwg-web incomplete, missing: ${missing.join(', ')}`);
 	}
 	else {
-		pass('vendor/libredwg-web (dist + wasm) complete');
+		pass('vendor/libredwg-web (bundled esm + wasm) complete');
 	}
 }
 

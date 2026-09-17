@@ -654,6 +654,59 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 
 `rawEntities` 来自 wasm 输出，可能含 INSERT 但 IR 类型不包含。处理方式：在 `ir.ts` 引入 `DwgInsertEntity` 作为 IR 内部临时类型，**只在 parser.ts → block-expander.ts 之间流转**，对外（iframe → 主进程）的 IR 类型中**不暴露 INSERT**。
 
+> ⚠️ **实测补充（v1.1.0）**：本节最初只考虑了「顶层实体含 INSERT」，
+> 遗漏了**块定义内部同样可以含 INSERT**（嵌套块，DWG 常规用法）。
+> `buildBlockDefs()` 曾对块内实体无条件调用 `rawToEntity()`，
+> 遇到嵌套 INSERT 即抛出 `Unsupported raw entity kind: INSERT`，
+> 表现为**整个文件解析失败**（错误被 i18n 占位符问题掩盖，只显示「解析失败」）。
+>
+> 现 `buildBlockDefs()` 改为递归展开 + `visiting` 集合做循环引用截断。
+> 新增块内实体类型时，必须同时确认 `rawToEntity` 与 `transformEntity` 都能处理。
+
+### 9.7 libredwg-web 的解析入口选择
+
+**结论**：读整个 DWG 必须用 `libredwg.convertEx(ptr).database`。
+
+`LibreDwg` 上有两个相似的转换方法，语义完全不同：
+
+| 方法 | 语义 | 返回值 |
+| --- | --- | --- |
+| `convert(object_ptr)` | **单个对象**转换，内部走 `dwg_object_to_entity` | 单个实体 |
+| `convertEx(data_ptr)` | **整个数据库**转换，内部走 `LibreDwgConverter.convert` | `{ database, stats }` |
+
+两者对同一个数据库指针**在部分样例上会给出相同结果**（实测 `entities` 数量一致），
+极具迷惑性。稳妥做法是始终使用 `convertEx(...).database`，
+其返回结构（`header` / `entities` / `tables.LAYER` / `tables.BLOCK_RECORD`）才是 IR 所需。
+
+`dwg_read_data(buffer, fileType)` 的 `fileType`：`0` = DWG，`1` = DXF（`Dwg_File_Type`）。
+**若传入非 `0`，函数直接返回 `undefined` 而不抛错**，故调用处必须判空。
+
+解析时控制台出现 `Open dwg file with error code: 64` 属于上游 `console.warn`，
+表示 DWG 版本较新但已成功解析，**不是失败信号**。
+
+### 9.8 错误信息必须可见
+
+`eda.sys_I18n.text()` **只查表翻译，不做任何插值**（实测 `{0}` / `${0}` / `%s` / `%1` 四种风格均原样返回）。
+插值必须由 `src/shared/i18n.ts` 的 `format()` 完成，占位符风格统一为 `{0}`。
+
+历史缺陷：插值函数替换的是 `${1}`，而语言文件写的是 `{0}`，
+导致界面出现字面量「解析失败：{0}」，真实原因被吞掉，故障定位成本极高。
+**任何用户可见的错误消息都必须带上具体原因**，否则等于没有报错。
+
+### 9.9 EDA 对话框容器的 id 选择器缺陷
+
+EDA 会把 iframe 弹窗容器 id 生成为 `<extensionUuid>.<iframeId>`
+（实测 DOM：`5d5d79bf5dd44287817ae29f79a2e9e4.dwg-importer-window`），
+并在 `ae.open` 内部用 `querySelector('#<uuid>.<id> ...')` 定位。
+
+由于 CSS 选择器中 `#` 后**不能以数字开头**，当扩展 uuid 以数字开头时，
+该选择器必然抛 `SyntaxError: ... is not a valid selector`。
+
+- 实测：`#5d5d79bf...` → 抛错；`#a5d5d79bf...` → 正常。
+- 该异常发生在 `setTimeout` 回调内，**`openIFrame` 仍返回成功，弹窗功能不受影响**，
+  属于 EDA 侧的噪声报错，扩展侧无法规避（换任何 `iframeId` 都无用，前缀恒定）。
+- 排查时不要被它误导：它**不是**「解析失败」的原因。
+
 ### 9.6 libredwg-bab 是否随包体积超 1.2 MB
 
 **验证**：`npm run build` 后查 `dist/assets/libredwg-*.wasm` 大小。

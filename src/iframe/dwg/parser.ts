@@ -91,8 +91,15 @@ interface DwgDatabaseLike {
 }
 
 interface LibreDwgLike {
+	/** 解析 DWG 字节流，返回 Dwg_Data 指针。fileType：0=DWG，1=DXF。 */
 	dwg_read_data: (content: ArrayBuffer, fileType: number) => unknown;
-	convert: (data: unknown) => DwgDatabaseLike;
+	/**
+	 * 整个数据库转换，返回 `{ database, stats }`。
+	 *
+	 * 注意不能误用 `convert(ptr)`：那是**单个对象**转换
+	 * （内部走 `dwg_object_to_entity`），把库指针喂进去只会得到垃圾数据。
+	 */
+	convertEx: (data: unknown) => { database: DwgDatabaseLike };
 	dwg_free?: (data: unknown) => void;
 }
 
@@ -180,15 +187,25 @@ export async function parseDwg(
 	options.onProgress?.(30);
 
 	let db: DwgDatabaseLike;
+	let dataPtr: unknown;
 	try {
-		const ptr = libredwg.dwg_read_data(buffer, DWG_FILE_TYPE_DWG);
-		if (ptr === undefined || ptr === null) {
+		dataPtr = libredwg.dwg_read_data(buffer, DWG_FILE_TYPE_DWG);
+		if (dataPtr === undefined || dataPtr === null) {
 			throw new Error('dwg_read_data returned no data');
 		}
-		db = libredwg.convert(ptr);
+		db = libredwg.convertEx(dataPtr).database;
 	}
 	catch (err) {
 		throw new Error(`Parse error: ${(err as Error).message}`);
+	}
+	finally {
+		// 释放 wasm 侧内存；失败不影响已转换出的纯 JS 数据。
+		try {
+			libredwg.dwg_free?.(dataPtr);
+		}
+		catch {
+			// 忽略：dwg_free 内部已自带 dwg_abandon 兜底
+		}
 	}
 	options.onProgress?.(70);
 
@@ -197,13 +214,22 @@ export async function parseDwg(
 		throw new Error(`Too many entities (>${options.maxEntities})`);
 	}
 
-	// BLOCK 定义：BLOCK_RECORD 表每一项带 entities；flags bit4/bit8 表示 XREF。
+	/*
+	 * BLOCK 定义：BLOCK_RECORD 表每一项带 entities。
+	 *
+	 * 过滤规则：
+	 * - `*Model_Space` / `*Paper_Space*` 是布局容器而非可复用块，
+	 *   其 entities 与顶层模型空间实体重复，若当作块会污染预览里的块列表；
+	 * - flags bit2（值 4）为 XREF 外部参照，跨文件无法解析；
+	 * - 空块没有展开价值。
+	 */
 	const blockEntries = db.tables?.BLOCK_RECORD?.entries ?? [];
 	const blockDefsRaw: Array<{ name: string; entities: RawDwgEntity[] }> = [];
 	for (const b of blockEntries) {
+		const isLayout = /^\*(?:Model|Paper)_Space/i.test(b.name);
 		const isXref = typeof b.flags === 'number' && (b.flags & 4) !== 0;
 		const entityList = b.entities ?? [];
-		if (isXref || entityList.length === 0)
+		if (isLayout || isXref || entityList.length === 0)
 			continue;
 		const converted: RawDwgEntity[] = [];
 		for (const e of entityList) {

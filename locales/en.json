@@ -1,7 +1,7 @@
 {
 	"About": "About",
 	"About DWG Importer": "About DWG Importer",
-	"DWG Importer v": "DWG Importer v${1}",
+	"DWG Importer v": "DWG Importer v{0}",
 	"DWG Importer Description": "This extension uses libredwg wasm to parse DWG files, distributed under GPL-3.0-or-later. Source: https://github.com/easyeda/eext-dwg-importer",
 
 	"Import DWG": "Import DWG",
@@ -12,7 +12,7 @@
 	"Import": "Import",
 	"Import {0} primitives": "Import ({0} primitives)",
 	"Close": "Close",
-	"Last directory: {0}": "Last directory: ${1}",
+	"Last directory: {0}": "Last directory: {0}",
 	"Status: idle": "Status: idle",
 	"Status: parsing {0}%": "Status: parsing {0}%",
 	"Status: parsed, {0} primitives, {1} layers": "Status: parsed, {0} primitives, {1} layers",

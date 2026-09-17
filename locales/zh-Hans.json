@@ -1,7 +1,7 @@
 {
 	"About": "关于",
 	"About DWG Importer": "关于 DWG 导入器",
-	"DWG Importer v": "DWG 导入器 v${1}",
+	"DWG Importer v": "DWG 导入器 v{0}",
 	"DWG Importer Description": "本扩展使用 libredwg wasm 解析 DWG 文件，并按 GPL-3.0-or-later 协议分发。源码仓库：https://github.com/easyeda/eext-dwg-importer",
 
 	"Import DWG": "导入 DWG",
@@ -12,7 +12,7 @@
 	"Import": "导入",
 	"Import {0} primitives": "导入（{0} 个图元）",
 	"Close": "关闭",
-	"Last directory: {0}": "上次打开目录：${1}",
+	"Last directory: {0}": "上次打开目录：{0}",
 	"Status: idle": "状态：待选文件",
 	"Status: parsing {0}%": "状态：解析中 {0}%",
 	"Status: parsed, {0} primitives, {1} layers": "状态：已解析，{0} 个图元，{1} 个图层",

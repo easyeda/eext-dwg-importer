@@ -15,6 +15,7 @@
 	"scripts": {
 		"compile": "rimraf ./dist/ && ts-node ./config/esbuild.prod.ts && npm run iframe",
 		"iframe": "ts-node ./build/iframe.ts",
+		"build:fallback": "rimraf ./dist/ && esbuild ./src/index --bundle --minify=false --platform=browser --format=iife --global-name=edaEsbuildExportName --outdir=./dist --entry-names=[name] --tree-shaking=true --ignore-annotations && esbuild ./src/iframe/index --bundle --minify=false --format=esm --platform=browser --target=es2020 --outdir=./dist/iframe --entry-names=[name] --tree-shaking=true --loader:.css=text --loader:.wasm=file --asset-names=../assets/[name]-[hash] --external:@mlightcad/libredwg-web && node ./scripts/build-fallback.mjs && ts-node ./build/packaged.ts",
 		"lint": "eslint",
 		"fix": "eslint --fix",
 		"build": "npm run compile && ts-node ./build/packaged.ts",
@@ -24,7 +25,8 @@
 		"manifest:generate": "npm install && ts-node ./build/manifest.ts generate",
 		"manifest:bump": "npm install && ts-node ./build/manifest.ts bump && npm install",
 		"sync:vendor": "node ./scripts/sync-vendor.mjs",
-		"check:license": "node ./scripts/check-license.mjs"
+		"check:license": "node ./scripts/check-license.mjs",
+		"check:parser": "node ./scripts/check-parser-e2e.mjs"
 	},
 	"devDependencies": {
 		"@antfu/eslint-config": "^5.4.1",
