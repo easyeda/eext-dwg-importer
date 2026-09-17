@@ -4,8 +4,11 @@
 		<title>DWG Importer</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<!-- 路径必须是扩展包内完整路径（以 / 开头），与 openIFrame 的 htmlFileName 一致。 -->
-		<script type="module" src="/iframe/index.js"></script>
+		<!--
+			路径为扩展包内绝对路径（以 / 开头），需与 openIFrame 的 htmlFileName 保持同一前缀。
+			弹窗 HTML 的包内路径是 /dist/iframe/index.html，故脚本也必须在 /dist/iframe/ 下。
+		-->
+		<script type="module" src="/dist/iframe/index.js"></script>
 	</head>
 	<body>
 		<div id="app" class="app">

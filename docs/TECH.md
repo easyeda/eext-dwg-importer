@@ -721,12 +721,23 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 
 | 问题 | 原写法 | 修正 |
 |---|---|---|
+| **弹窗路径错误（点击菜单无反应）** | `openIFrame('/iframe/index.html')` | **`/dist/iframe/index.html`**——`htmlFileName` 以 **`.eext` 包根目录**为基准，而本扩展产物在 `dist/` 下。原路径对应文件不存在，`openIFrame` 静默返回 `false`，浏览器无任何报错 |
+| HTML 内脚本路径同样错误 | `src="/iframe/index.js"` | `src="/dist/iframe/index.js"` |
 | 文本对齐枚举无 `0` 值 | `STRING_ALIGN_LEFT = 0` | `LEFT_BOTTOM = 3`（枚举从 1 开始；3 与 DWG 文本左下基点一致） |
 | 多边形源数组顺序错误 | `['L', x1, y1, x2, y2, ...]` | `[x1, y1, 'L', x2, y2, ...]`——**首坐标点在 `'L'` 之前** |
 | 多段线未闭合 | 直接输出原点列 | 闭合时补回首点，保证单多边形首尾重合 |
 | `PCB_PrimitiveRegion.create` 参数类型 | 写成 `IPCB_ComplexPolygon` | 实为 `IPCB_Polygon`（本项目未使用 Region，仅修正类型） |
 | `OpenIFrameProps` 含不存在的 `x`/`y` | 有 | 移除 |
 | `DEFAULT_FONT` | `'Arial'` | `'default'`（与官方示例一致） |
+
+**关于路径基准的判定依据**：`openIFrame` 的 `props` 里不含 `x`/`y`，官方示例传入的是
+`openIFrame('/extension.json', ...)` —— `extension.json` 位于包根目录，说明前导 `/` 指向
+**.eext 包根**。本扩展 `extension.json` 的 `"entry": "./dist/index"` 也印证产物在 `dist/` 下。
+据此，弹窗 HTML 的包内路径为 `/dist/iframe/index.html`。
+
+**已加构建期防护**：`build/iframe.ts` 新增 `assertHtmlPaths()`，会校验
+①HTML 中所有绝对路径在仓库内确实存在；②`import-dwg.ts` 的 `IFRAME_HTML` 与实际产物路径一致。
+不一致则构建失败，避免此类「路径写错但无任何报错」的问题再次流入。
 
 **待运行时确认（无法静态验证）：**
 
