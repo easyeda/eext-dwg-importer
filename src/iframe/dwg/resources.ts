@@ -7,15 +7,23 @@
  * - 但 JS 内部的 `import()` / `fetch()` **不会**被这样处理；
  *   而弹窗页面本身由 blob URL 承载，`import.meta.url` 形如
  *   `blob:https://.../uuid`，据此做相对路径解析会直接抛 `Invalid URL`。
+ * - 更麻烦的是：blob: 协议下**连模块内部的相对 import 也无法解析**。
+ *   上游 libredwg 的 ESM 包装层内部用 `import "../wasm/libredwg-web.js"`
+ *   引用胶水层，故直接用上游产物会报：
+ *     Failed to resolve module specifier "../wasm/libredwg-web.js".
+ *     Invalid relative url or base scheme isn't hierarchical.
+ *   因此 scripts/sync-vendor.mjs 会把「包装层 + 胶水层」合并为**单个自包含模块**，
+ *   产物中不含任何相对 import。
  *
- * 因此方案是：在 index.html 里用 `<link rel="preload">` 登记这些资源，
+ * 方案：在 index.html 里用 `<link rel="preload">` 登记这些资源，
  * 让 EDA 完成 blob URL 改写；运行时（本模块）从 DOM 取回改写后的 URL 使用。
  *
  * 对应的 HTML 元素 id 见 index.html，勿随意改名；
- * build/iframe.ts 的 assertVendorLinks() 会在构建期校验其存在。
+ * build/iframe.ts 的 assertVendorLinks() 会在构建期校验。
  */
 
-const SQL = {
+/** 资源元素 id，须与 index.html 保持一致。 */
+const RESOURCE_ID = {
 	module: 'vendor-libredwg',
 	wasm: 'vendor-libredwg-wasm',
 } as const;
@@ -31,22 +39,20 @@ function resourceUrl(id: string): string {
 	return url;
 }
 
-/** libredwg ESM 包装模块的 URL。 */
+/** 解析引擎模块（自包含 ESM）的 URL。 */
 export function vendorModuleUrl(): string {
-	return resourceUrl(SQL.module);
+	return resourceUrl(RESOURCE_ID.module);
 }
 
 /**
- * wasm 所在的“目录”URL。
+ * wasm 二进制文件的完整 URL。
  *
- * 上游 `LibreDwg.create(filepath)` 内部会拼成 `${filepath}/${filename}`
- * （见 @mlightcad/libredwg-web 的 create 实现），因此这里需要传入
- * **去掉文件名后的前缀**，再交给它拼上 `libredwg-web.wasm`。
+ * 上游 `LibreDwg.create(filepath)` 内部会拼成 `${filepath}/${filename}`，
+ * 但那是「目录 + 固定文件名」的形式；这里 wasm 已是**独立 blob URL**
+ * （改写成 blob 后没有可用的目录概念），故不能走 create(filepath)，
+ * 而是用 createModule 的 locateFile 钩子直接返回该 URL。
+ * 见 parser.ts 的加载逻辑。
  */
-export function vendorWasmDir(): string {
-	const url = resourceUrl(SQL.wasm);
-	const idx = url.lastIndexOf('/');
-	if (idx < 0)
-		throw new Error(`wasm 资源 URL 异常，无法解析目录：${url}`);
-	return url.slice(0, idx);
+export function vendorWasmUrl(): string {
+	return resourceUrl(RESOURCE_ID.wasm);
 }

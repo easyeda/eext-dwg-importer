@@ -171,8 +171,8 @@ async function assertVendorLinks(htmlPath: string): Promise<void> {
 	const html = await fs.readFile(htmlPath, 'utf-8');
 	// 资源 id → 期望的包内路径
 	const expected: Array<[string, string]> = [
-		['vendor-libredwg', '/dist/vendor/libredwg-web/dist/libredwg-web.js'],
-		['vendor-libredwg-wasm', '/dist/vendor/libredwg-web/wasm/libredwg-web.wasm'],
+		['vendor-libredwg', '/dist/vendor/libredwg-web/libredwg-web.js'],
+		['vendor-libredwg-wasm', '/dist/vendor/libredwg-web/libredwg-web.wasm'],
 	];
 
 	for (const [id, wantPath] of expected) {
@@ -200,6 +200,22 @@ async function assertVendorLinks(htmlPath: string): Promise<void> {
 				+ `  期望位于：${path.relative(ROOT, onDisk)}\n`
 				+ '  提示：先执行 `npm run sync:vendor`，再由 build/iframe.ts 拷贝到 dist/vendor/。',
 			);
+		}
+
+		// 引擎 JS 必须是无相对 import 的自包含模块。
+		// 原因：弹窗页面由 blob URL 承载，blob: 协议不支持相对路径解析；
+		// 上游产物内部 `import "../wasm/libredwg-web.js"` 会直接失败
+		// （Failed to resolve module specifier ... isn't hierarchical）。
+		// scripts/sync-vendor.mjs 会把包装层与胶水层合并以消除该引用。
+		if (id === 'vendor-libredwg') {
+			const js = await fs.readFile(onDisk, 'utf-8');
+			const relImport = js.match(/from\s+['"]\.\.?\//);
+			if (relImport) {
+				throw new Error(
+					`解析引擎含相对 import（blob 环境下无法解析）：${relImport[0]}\n`
+					+ '  请执行 `npm run sync:vendor` 重新生成自包含的合并产物。',
+				);
+			}
 		}
 	}
 

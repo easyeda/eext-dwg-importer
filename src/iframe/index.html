@@ -20,12 +20,18 @@
 			但 JS 内部的 import() / fetch() **不会**被这样处理，
 			而 iframe 页面本身是 blob URL，用相对路径解析会抛 Invalid URL。
 
-			因此这里用 rel="preload"（浏览器只预载、不执行）把两个资源"登记"进 DOM，
-			使 EDA 完成 blob URL 改写；运行时再由 resources.ts 从 DOM 取回对应的
-			blob URL 交给解析器。顺序不能调换：link 必须先于 script。
+			因此这里用 rel="preload"（浏览器只预载、不执行）把资源"登记"进 DOM，
+			使 EDA 完成 blob URL 改写；运行时再由 dwg/resources.ts 取回使用：
+
+			  vendor-libredwg      → 合并后的自包含 ESM（由 sync-vendor.mjs 生成）
+			  vendor-libredwg-wasm → wasm 二进制，其 URL 经 locateFile 传给引擎
+
+			注意：引擎文件必须是**无相对 import** 的自包含模块 ——
+			上游原始产物内部用 `import "../wasm/..."` 引用胶水层，
+			在 blob 下会因无法解析相对路径而失败（故 sync-vendor.mjs 做了合并）。
 		-->
-		<link rel="preload" as="script" id="vendor-libredwg" href="/dist/vendor/libredwg-web/dist/libredwg-web.js" />
-		<link rel="preload" as="fetch" id="vendor-libredwg-wasm" href="/dist/vendor/libredwg-web/wasm/libredwg-web.wasm" />
+		<link rel="preload" as="script" id="vendor-libredwg" href="/dist/vendor/libredwg-web/libredwg-web.js" />
+		<link rel="preload" as="fetch" id="vendor-libredwg-wasm" href="/dist/vendor/libredwg-web/libredwg-web.wasm" />
 	</head>
 	<body>
 		<div id="app" class="app">

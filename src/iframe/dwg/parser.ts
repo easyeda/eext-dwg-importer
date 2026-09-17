@@ -16,7 +16,7 @@ import type { DwgIR, DwgPoint } from '../../shared/types';
 import type { RawDwgEntity } from './ir';
 import { buildBlockDefs, expandInserts } from './block-expander';
 import { buildIR, detectUnits } from './ir';
-import { vendorModuleUrl, vendorWasmDir } from './resources';
+import { vendorModuleUrl, vendorWasmUrl } from './resources';
 
 export interface ParseOptions {
 	onProgress?: (percent: number) => void;
@@ -97,7 +97,16 @@ interface LibreDwgLike {
 }
 
 interface LibredwgModule {
-	LibreDwg?: { create: (wasmDir?: string) => Promise<LibreDwgLike> };
+	/**
+	 * wasm 胶水层的默认导出（合并后仍保留导出）。
+	 * 支持通过入参传入 `locateFile` 覆盖 wasm 路径。
+	 */
+	createModule?: (moduleArg?: Record<string, unknown>) => Promise<unknown>;
+	/** ESM 包装层：提供类型转换与 LibreDwg.create 便捷方法。 */
+	LibreDwg?: {
+		create: (filepath?: string) => Promise<LibreDwgLike>;
+		createByWasmInstance: (instance: unknown) => LibreDwgLike;
+	};
 	Dwg_File_Type?: { DWG: number; DXF: number };
 }
 
@@ -110,19 +119,17 @@ async function loadModule(): Promise<{ libredwg: LibreDwgLike }> {
 		return { libredwg: fromGlobal };
 
 	/*
-	 * 2. 从 HTML 登记的 blob URL 动态 import。
+	 * 2. 取回由 HTML 登记、EDA 改写后的 blob URL。
 	 *
 	 * 不能用 `new URL('../vendor/...', import.meta.url)`：
-	 * 弹窗页面由 blob URL 承载，import.meta.url 形如 `blob:https://.../uuid`，
-	 * 相对路径解析会抛 `Invalid URL`（已实测）。
-	 * 故改由 index.html 的 <link rel="preload"> 登记、EDA 改写为 blob URL，
-	 * 这里通过 resources.ts 取回。详见 resources.ts 顶部说明。
+	 * 弹窗页面由 blob URL 承载，相对解析会抛 `Invalid URL`（已实测）。
+	 * 详见 resources.ts 顶部说明。
 	 */
-	let url: string;
-	let wasmDir: string;
+	let moduleUrl: string;
+	let wasmUrl: string;
 	try {
-		url = vendorModuleUrl();
-		wasmDir = vendorWasmDir();
+		moduleUrl = vendorModuleUrl();
+		wasmUrl = vendorWasmUrl();
 	}
 	catch (err) {
 		throw new Error(`解析引擎资源缺失：${(err as Error).message}`);
@@ -130,18 +137,32 @@ async function loadModule(): Promise<{ libredwg: LibreDwgLike }> {
 
 	let mod: LibredwgModule;
 	try {
-		mod = (await import(/* @vite-ignore */ url)) as unknown as LibredwgModule;
+		mod = (await import(/* @vite-ignore */ moduleUrl)) as unknown as LibredwgModule;
 	}
 	catch (err) {
 		throw new Error(`加载解析引擎失败：${(err as Error).message}`);
 	}
 
-	const factory = mod.LibreDwg;
-	if (!factory)
-		throw new Error('解析引擎导出异常（缺少 LibreDwg）');
+	/*
+	 * 3. 指定 wasm 并实例化。
+	 *
+	 * 不用 `LibreDwg.create(filepath)`：它内部会拼 `${filepath}/${filename}`，
+	 * 而经 blob 改写后的 wasm 是独立 blob URL（无可用目录概念）。
+	 * 故直接用胶水层的 createModule，通过 locateFile 精确返回该 URL。
+	 */
+	const createModule = mod.createModule;
+	if (!createModule || !mod.LibreDwg)
+		throw new Error('解析引擎导出异常（缺少 createModule 或 LibreDwg）');
 
-	// create(filepath) 内部会拼成 `${filepath}/${filename}`，故传目录。
-	return { libredwg: await factory.create(wasmDir) };
+	try {
+		const wasmInstance = await createModule({
+			locateFile: (filename: string) => (filename.endsWith('.wasm') ? wasmUrl : filename),
+		});
+		return { libredwg: mod.LibreDwg.createByWasmInstance(wasmInstance) };
+	}
+	catch (err) {
+		throw new Error(`初始化解析引擎失败：${(err as Error).message}`);
+	}
 }
 
 /** 主解析入口。 */
