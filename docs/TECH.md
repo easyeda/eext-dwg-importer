@@ -721,7 +721,10 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 
 | 问题 | 原写法 | 修正 |
 |---|---|---|
-| **弹窗路径错误（点击菜单无反应）** | `openIFrame('/iframe/index.html')` | **`/dist/iframe/index.html`**——`htmlFileName` 以 **`.eext` 包根目录**为基准，而本扩展产物在 `dist/` 下。原路径对应文件不存在，`openIFrame` 静默返回 `false`，浏览器无任何报错 |
+| **`eda` 访问方式错误（点菜单无反应的真正根因）** | `globalThis.eda` | EDA 把扩展代码包在 `async function (eda) {...}` 中执行，`eda` 是**注入的函数参数**；`globalThis.eda` 恒为 `undefined`。因所有调用都走可选链，失败被完全吞掉 → 表现为「点了没反应且无报错」。改为引用裸标识符 `eda` |
+| **弹窗脚本位置错误（弹窗空白/崩溃）** | 脚本写在文档头部 | EDA 通过 blob URL 注入页面，`type="module"` 的 defer 语义不可靠，执行时 `#app` 尚未解析 → `getElementById` 返回 `null`。脚本移至 `body` 末尾，并加 `domReady()` 兜底 |
+| `SYS_I18n.text` 参数错位 | `text(key, ...args)` | 真实签名为 `text(tag, namespace?, language?, ...args)`，插值参数须从第 4 位起 |
+| **弹窗路径错误（点击菜单无反应）** | `openIFrame('/iframe/index.html')` | **`/dist/iframe/index.html`**——`htmlFileName` 以 **`.eext` 包根目录**为基准，而本扩展产物在 `dist/` 下 |
 | HTML 内脚本路径同样错误 | `src="/iframe/index.js"` | `src="/dist/iframe/index.js"` |
 | 文本对齐枚举无 `0` 值 | `STRING_ALIGN_LEFT = 0` | `LEFT_BOTTOM = 3`（枚举从 1 开始；3 与 DWG 文本左下基点一致） |
 | 多边形源数组顺序错误 | `['L', x1, y1, x2, y2, ...]` | `[x1, y1, 'L', x2, y2, ...]`——**首坐标点在 `'L'` 之前** |
@@ -729,6 +732,22 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 | `PCB_PrimitiveRegion.create` 参数类型 | 写成 `IPCB_ComplexPolygon` | 实为 `IPCB_Polygon`（本项目未使用 Region，仅修正类型） |
 | `OpenIFrameProps` 含不存在的 `x`/`y` | 有 | 移除 |
 | `DEFAULT_FONT` | `'Arial'` | `'default'`（与官方示例一致） |
+
+**关于 `eda` 的实测依据**（在 EDA 4.1.46 中执行）：
+```
+typeof globalThis.eda  →  "undefined"
+typeof eda             →  "object"
+globalThis.eda === eda →  false
+```
+另一个佐证是实机日志：`[pro-api][DEBUG][runCompiledUserScript] 脚本执行成功（resolve）`
+—— 代码「执行成功」却没有任何日志输出，正是所有 `eda?.x?.y?.()` 调用被静默跳过的表现。
+
+**已知的 EDA 自身缺陷（非本扩展问题）**：EDA 4.1.48 的 `iframeDialog` 会用
+`#<uuid>.<id> .lc_modal_dialog_box_*` 作为 `querySelector` 的参数，而 `.` 在 CSS 选择器
+中是类选择符，故抛出 `SyntaxError: ... is not a valid selector`。
+该错误发生在弹窗**渲染完成之后**，**不影响弹窗显示**（实测确认：窗口节点存在、HTML 内容与
+注入的 CSS 均正常）。注意 EDA 自身要求窗口 id 不得含 `.`、空格、`|`、`/`、`\`、`#`、`@`，
+本扩展使用的 `dwg-importer-window` 是合法 id。
 
 **关于路径基准的判定依据**：`openIFrame` 的 `props` 里不含 `x`/`y`，官方示例传入的是
 `openIFrame('/extension.json', ...)` —— `extension.json` 位于包根目录，说明前导 `/` 指向

@@ -41,6 +41,11 @@ async function main(): Promise<void> {
 	// 该问题在浏览器里没有任何报错，极难定位。
 	await assertHtmlPaths(htmlSrc);
 
+	// 2c. 一致性校验：TS 里引用的 data-role 必须都在 HTML 中定义。
+	// 对应「HTML 漏写 data-role，TS 用非空断言 '!' 取值，运行时 null 崩溃」这类问题：
+	// 编译期断言不报错，运行时整个初始化中断，表现为弹窗只有静态骨架、按钮无文字。
+	await assertDataRoles(htmlSrc);
+
 	// 3. 拷贝 vendor/libredwg-web（若存在）
 	if (await fs.pathExists(VENDOR_LIBREDWG)) {
 		await fs.ensureDir(DIST_VENDOR);
@@ -91,6 +96,71 @@ async function assertHtmlPaths(htmlPath: string): Promise<void> {
 	}
 
 	console.log(`[iframe] path check OK (${declared}, ${refs.length} ref)`);
+}
+
+/**
+ * 校验 TS 中引用的所有 data-role 都在 HTML 里定义。
+ *
+ * 背景：代码大量使用 `querySelector('[data-role="x"]')!` 这种非空断言。
+ * 断言只在编译期有效，若 HTML 缺少该属性，运行时得到 null，
+ * 紧接着的属性访问会抛 TypeError 并中断整个初始化流程，
+ * 而弹窗仍会显示静态骨架，看起来「打开了但不可用」，极难定位。
+ */
+async function assertDataRoles(htmlPath: string): Promise<void> {
+	const html = await fs.readFile(htmlPath, 'utf-8');
+	const defined = new Set(
+		[...html.matchAll(/data-role\s*=\s*"([^"]+)"/g)].map(m => m[1]!),
+	);
+
+	// 扫描 src/iframe 下所有 TS，收集引用的 data-role
+	const tsFiles = await collectTsFiles(path.join(ROOT, 'src', 'iframe'));
+	const referenced = new Map<string, string>(); // role -> 文件路径
+	const add = (role: string, file: string): void => {
+		if (!referenced.has(role))
+			referenced.set(role, path.relative(ROOT, file));
+	};
+
+	for (const f of tsFiles) {
+		const src = await fs.readFile(f, 'utf-8');
+
+		// ① 直接选择器：[data-role="x"]
+		for (const m of src.matchAll(/\[data-role="([^"]+)"\]/g)) {
+			const role = m[1]!;
+			// 跳过模板变量（如 need() 内部动态构造的 `[data-role="${role}"]`）
+			if (!role.includes('$'))
+				add(role, f);
+		}
+
+		// ② 辅助函数调用：need(xxx, 'role') / need<HTMLButtonElement>(xxx, 'role')
+		for (const m of src.matchAll(/\bneed(?:<[^>]*>)?\([^,)]+,\s*'([^']+)'\s*\)/g)) {
+			add(m[1]!, f);
+		}
+	}
+
+	const missing = [...referenced.entries()].filter(([role]) => !defined.has(role));
+	if (missing.length > 0) {
+		const lines = missing.map(([role, file]) => `  - "${role}"  （被 ${file} 引用）`).join('\n');
+		throw new Error(
+			`以下 data-role 在 iframe/index.html 中不存在：\n${lines}\n`
+			+ '  请在 HTML 中补上对应的 data-role 属性，否则运行时 querySelector 返回 null 会中断初始化。',
+		);
+	}
+
+	console.log(`[iframe] data-role check OK (引用 ${referenced.size} 个，HTML 定义 ${defined.size} 个)`);
+}
+
+/** 递归收集目录下的 .ts 文件。 */
+async function collectTsFiles(dir: string): Promise<string[]> {
+	const out: string[] = [];
+	for (const entry of await fs.readdir(dir)) {
+		const full = path.join(dir, entry);
+		const stat = await fs.stat(full);
+		if (stat.isDirectory())
+			out.push(...await collectTsFiles(full));
+		else if (entry.endsWith('.ts'))
+			out.push(full);
+	}
+	return out;
 }
 
 main().catch((err) => {
