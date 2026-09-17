@@ -749,6 +749,29 @@ globalThis.eda === eda →  false
 注入的 CSS 均正常）。注意 EDA 自身要求窗口 id 不得含 `.`、空格、`|`、`/`、`\`、`#`、`@`，
 本扩展使用的 `dwg-importer-window` 是合法 id。
 
+**为什么无法在扩展侧规避**（实测结论）：
+EDA 在内部给窗口 DOM 节点生成 id 时，会**无条件**拼上 `<扩展UUID>.` 前缀，
+与调用方传入的 id 无关。实测三种 id（含纯字母数字 `dwgimporterwin`、`abc123`）生成的容器 id 均为：
+
+```
+iframeContainer5d5d79bf5dd44287817ae29f79a2e9e4.dwg-importer-window
+iframeContainerbded3619ce6a4e60a35c7f4a84739702.dwgimporterwin
+```
+
+即点号由 EDA 自身引入。它随后又把 `#<uuid>.<id> .lc_modal_dialog_box_*` 直接交给
+`querySelector`，而 `.` 在选择器语法中是类选择符，故必然抛
+`SyntaxError: ... is not a valid selector`。
+这是 EDA 4.1.48 的缺陷，扩展侧没有任何 id 命名方式可以避开。
+
+**实际影响：无。** 判据（均为实机实测）：
+- 弹窗正常可见（920×620），标题、左右两栏、按钮、表格元素全部就位；
+- 引擎链路可用：模块 `import` 成功 → `createModule` 实例化成功 → `dwg_read_data`/`convert` 就绪；
+- 报错出现在 `iframeDialog` 渲染完成之后的 `setTimeout` 中，属 EDA 内部的后续定位动作。
+
+另一条 `Script error. 0 0 null` 是浏览器对跨域脚本异常的通用占位信息
+（无文件名/行号即为此特征），来源同样是 EDA 自己的页面脚本；
+`jlc-apm-sdk.js ... 405` 则是 EDA 自身埋点上报被服务端拒绝，均与扩展无关。
+
 **关于路径基准的判定依据**：`openIFrame` 的 `props` 里不含 `x`/`y`，官方示例传入的是
 `openIFrame('/extension.json', ...)` —— `extension.json` 位于包根目录，说明前导 `/` 指向
 **.eext 包根**。本扩展 `extension.json` 的 `"entry": "./dist/index"` 也印证产物在 `dist/` 下。
