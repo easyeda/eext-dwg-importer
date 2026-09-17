@@ -29,82 +29,95 @@
 	</head>
 	<body>
 		<div id="app" class="app">
+			<!--
+				左右两栏布局：
+				  左栏 = 文件选择 + 图层映射（图层较多，仅此区域内部滚动）
+				  右栏 = 选项 + 预览（固定宽度，内容量稳定）
+				底部 footer 由 .app 的纵向 flex 固定在底部，不随内容滚动。
+				整体不出现页面级滚动条（body overflow: hidden）。
+			-->
 			<main data-role="main" class="app-main">
-				<section data-role="file-section" class="card">
-					<div data-role="dropzone" class="dropzone"></div>
-					<input data-role="file-input" type="file" accept=".dwg" hidden />
-					<div class="file-meta">
-						<span data-role="file-name"></span>
-						<span data-role="status"></span>
-					</div>
-				</section>
+				<div class="col col-left">
+					<section data-role="file-section" class="card">
+						<div data-role="dropzone" class="dropzone"></div>
+						<input data-role="file-input" type="file" accept=".dwg" hidden />
+						<div class="file-meta">
+							<span data-role="file-name"></span>
+							<span data-role="status"></span>
+						</div>
+					</section>
 
-				<section data-role="layer-mapping-section" class="card">
-					<div data-role="toolbar" class="toolbar">
-						<button data-role="select-all" class="btn"></button>
-						<button data-role="deselect-all" class="btn"></button>
-						<button data-role="by-color" class="btn"></button>
-						<button data-role="by-name" class="btn"></button>
-						<button data-role="reset" class="btn"></button>
-					</div>
-					<table class="mapping-table">
-						<thead>
-							<tr>
-								<th></th>
-								<th data-role="col-dwg">DWG</th>
-								<th>✓</th>
-								<th data-role="col-pcb"></th>
-							</tr>
-						</thead>
-						<tbody data-role="rows"></tbody>
-					</table>
-				</section>
+					<section data-role="layer-mapping-section" class="card card-grow">
+						<div data-role="toolbar" class="toolbar">
+							<button data-role="select-all" class="btn"></button>
+							<button data-role="deselect-all" class="btn"></button>
+							<button data-role="by-color" class="btn"></button>
+							<button data-role="by-name" class="btn"></button>
+							<button data-role="reset" class="btn"></button>
+						</div>
+						<div class="table-wrap">
+							<table class="mapping-table">
+								<thead>
+									<tr>
+										<th></th>
+										<th data-role="col-dwg">DWG</th>
+										<th>✓</th>
+										<th data-role="col-pcb"></th>
+									</tr>
+								</thead>
+								<tbody data-role="rows"></tbody>
+							</table>
+						</div>
+					</section>
+				</div>
 
-				<section data-role="options-section" class="card">
-					<div data-role="title" class="card-title"></div>
-					<div data-role="kind-label" style="margin-bottom: 4px; color: var(--text-secondary); font-size: 12px;"></div>
-					<div data-role="kind-grid" class="kind-grid"></div>
-					<div class="options-row">
-						<span data-role="width-label"></span>
-						<select data-role="width-select"></select>
-					</div>
-					<div class="options-row">
-						<span data-role="unit-label"></span>
-						<select data-role="unit-select"></select>
-					</div>
-					<div class="options-row">
-						<label>
-							<input data-role="skip-empty" type="checkbox" />
-							<span data-role="skip-empty-label"></span>
-						</label>
-					</div>
-					<div class="options-row">
-						<label style="opacity: 0.5">
-							<input type="checkbox" disabled />
-							<span data-role="merge-collinear-label"></span>
-						</label>
-					</div>
-				</section>
+				<div class="col col-right">
+					<section data-role="options-section" class="card">
+						<div data-role="title" class="card-title"></div>
+						<div data-role="kind-label" class="sub-label"></div>
+						<div data-role="kind-grid" class="kind-grid"></div>
+						<div class="options-row">
+							<span data-role="width-label"></span>
+							<select data-role="width-select"></select>
+						</div>
+						<div class="options-row">
+							<span data-role="unit-label"></span>
+							<select data-role="unit-select"></select>
+						</div>
+						<div class="options-row">
+							<label>
+								<input data-role="skip-empty" type="checkbox" />
+								<span data-role="skip-empty-label"></span>
+							</label>
+						</div>
+						<div class="options-row">
+							<label class="is-disabled">
+								<input type="checkbox" disabled />
+								<span data-role="merge-collinear-label"></span>
+							</label>
+						</div>
+					</section>
 
-				<section data-role="preview-section" class="card">
-					<div data-role="title" class="card-title"></div>
-					<div class="preview-line">
-						<span data-role="bbox-label" class="preview-label"></span>
-						<span data-role="bbox" class="preview-value">—</span>
-					</div>
-					<div class="preview-line">
-						<span data-role="counts-label" class="preview-label"></span>
-						<span data-role="counts" class="preview-value"></span>
-					</div>
-					<div class="preview-line">
-						<span data-role="blocks-label" class="preview-label"></span>
-						<span data-role="blocks" class="preview-value"></span>
-					</div>
-					<div>
-						<span data-role="warnings-label" class="preview-label"></span>
-						<ul data-role="warnings"></ul>
-					</div>
-				</section>
+					<section data-role="preview-section" class="card card-grow">
+						<div data-role="title" class="card-title"></div>
+						<div class="preview-line">
+							<span data-role="bbox-label" class="preview-label"></span>
+							<span data-role="bbox" class="preview-value">—</span>
+						</div>
+						<div class="preview-line">
+							<span data-role="counts-label" class="preview-label"></span>
+							<span data-role="counts" class="preview-value"></span>
+						</div>
+						<div class="preview-line">
+							<span data-role="blocks-label" class="preview-label"></span>
+							<span data-role="blocks" class="preview-value"></span>
+						</div>
+						<div class="preview-line preview-line-top">
+							<span data-role="warnings-label" class="preview-label"></span>
+							<ul data-role="warnings" class="preview-warnings"></ul>
+						</div>
+					</section>
+				</div>
 			</main>
 
 			<footer data-role="footer" class="app-footer">

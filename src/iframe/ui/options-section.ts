@@ -5,6 +5,7 @@
 import type { DwgEntityKind, DwgUnit, ImportOptions } from '../../shared/types';
 import { t } from '../../shared/i18n';
 import { ALL_ENTITY_KINDS } from '../../shared/types';
+import { need } from './dom';
 
 const PRESET_WIDTHS: ReadonlyArray<number> = [1, 2, 4, 6, 8, 10, 20];
 
@@ -25,17 +26,17 @@ export interface OptionsSection {
 }
 
 export function createOptionsSection(root: HTMLElement): OptionsSection {
-	const kindBox = root.querySelector<HTMLDivElement>('[data-role="kind-grid"]')!;
-	const widthSelect = root.querySelector<HTMLSelectElement>('[data-role="width-select"]')!;
-	const unitSelect = root.querySelector<HTMLSelectElement>('[data-role="unit-select"]')!;
-	const skipEmpty = root.querySelector<HTMLInputElement>('[data-role="skip-empty"]')!;
+	const kindBox = need(root, 'kind-grid');
+	const widthSelect = need<HTMLSelectElement>(root, 'width-select');
+	const unitSelect = need<HTMLSelectElement>(root, 'unit-select');
+	const skipEmpty = need<HTMLInputElement>(root, 'skip-empty');
 
-	root.querySelector('[data-role="title"]')!.textContent = t('Options');
-	root.querySelector('[data-role="kind-label"]')!.textContent = t('Entity types');
-	root.querySelector('[data-role="width-label"]')!.textContent = t('Default line width');
-	root.querySelector('[data-role="unit-label"]')!.textContent = t('Units');
-	root.querySelector('[data-role="skip-empty-label"]')!.textContent = t('Skip empty layers');
-	root.querySelector('[data-role="merge-collinear-label"]')!.textContent = t('Merge collinear segments (coming soon)');
+	need(root, 'title').textContent = t('Options');
+	need(root, 'kind-label').textContent = t('Entity types');
+	need(root, 'width-label').textContent = t('Default line width');
+	need(root, 'unit-label').textContent = t('Units');
+	need(root, 'skip-empty-label').textContent = t('Skip empty layers');
+	need(root, 'merge-collinear-label').textContent = t('Merge collinear segments (coming soon)');
 
 	for (const w of PRESET_WIDTHS) {
 		const opt = document.createElement('option');

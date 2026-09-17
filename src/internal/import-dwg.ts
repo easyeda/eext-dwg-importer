@@ -22,6 +22,16 @@ const IFRAME_HTML = '/dist/iframe/index.html';
 const IFRAME_ID = 'dwg-importer-window';
 
 /**
+ * 弹窗尺寸。
+ *
+ * 采用左右两栏布局（左：文件 + 图层映射；右：选项 + 预览），
+ * 故需要比单列布局更宽；高度取 620 以在常见屏幕下不超出可视区
+ * （EDA 会把该高度再加上标题栏高度）。
+ */
+const IFRAME_WIDTH = 920;
+const IFRAME_HEIGHT = 620;
+
+/**
  * 被 src/index.ts 的三个 registerFn 调用。
  *
  * EDA 已按编辑器环境分组菜单，故传入的 documentType 与当前环境一致。
@@ -65,7 +75,7 @@ export async function importDwg(documentType: ImportDocumentType): Promise<void>
 		// openIFrame 不支持 query 参数，启动参数经 Storage 传递。
 		await eda?.sys_Storage?.setExtensionUserConfig?.(KEY_LAUNCH, { documentType });
 
-		const opened = await iframeApi.openIFrame(IFRAME_HTML, 760, 660, IFRAME_ID, {
+		const opened = await iframeApi.openIFrame(IFRAME_HTML, IFRAME_WIDTH, IFRAME_HEIGHT, IFRAME_ID, {
 			/*
 			 * 标题用 sys_I18n.text() 翻译后传入。
 			 *

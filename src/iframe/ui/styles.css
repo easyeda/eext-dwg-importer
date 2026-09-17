@@ -54,25 +54,66 @@ body {
 	line-height: 1.5;
 }
 
+/*
+ * 布局要点（弹窗内不出现页面级滚动条）：
+ *   html/body 固定为视口高度且 overflow:hidden；
+ *   #app 为纵向 flex（main 占满剩余高度 + footer 固定在其下方）；
+ *   main 内为左右两栏，两栏各自高度受限；
+ *   仅「图层映射表格」区域内部滚动（图层数量不可控，必须可滚）。
+ * 这样底部按钮始终可见，不随内容滚动。
+ */
+html,
+body {
+	height: 100%;
+	overflow: hidden;
+}
+
 body {
 	display: flex;
 	flex-direction: column;
-	min-height: 100vh;
 }
 
 .app {
 	display: flex;
 	flex-direction: column;
 	flex: 1;
+	min-height: 0; /* 允许子项收缩，否则内部滚动失效 */
 }
 
 .app-main {
 	flex: 1;
-	overflow-y: auto;
-	padding: 16px;
+	min-height: 0;
+	display: flex;
+	flex-direction: row;
+	gap: 12px;
+	padding: 12px;
+	overflow: hidden;
+}
+
+/* 左栏较宽（图层映射表），右栏固定宽度（选项 + 预览） */
+.col {
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 12px;
+	min-height: 0;
+}
+
+.col-left {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.col-right {
+	flex: 0 0 300px;
+	width: 300px;
+}
+
+/* 需要占用剩余高度、并在内部滚动的卡片 */
+.card-grow {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
 }
 
 .app-footer {
@@ -82,6 +123,7 @@ body {
 	padding: 12px 16px;
 	border-top: 1px solid var(--border);
 	background: var(--bg-secondary);
+	flex: 0 0 auto;
 }
 
 .card {
@@ -89,6 +131,7 @@ body {
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	padding: 12px 14px;
+	min-height: 0;
 }
 
 .card-title {
@@ -96,6 +139,12 @@ body {
 	margin-bottom: 10px;
 	color: var(--text-primary);
 	font-size: 13px;
+}
+
+.sub-label {
+	margin-bottom: 4px;
+	color: var(--text-secondary);
+	font-size: 12px;
 }
 
 .dropzone {
@@ -161,11 +210,25 @@ body {
 	gap: 6px;
 	flex-wrap: wrap;
 	margin-bottom: 8px;
+	flex: 0 0 auto;
+}
+
+/*
+ * 图层表格的滚动容器：唯一允许滚动的区域。
+ * 表头用 sticky 固定，滚列表时始终可见。
+ */
+.table-wrap {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	border: 1px solid var(--border);
+	border-radius: 6px;
 }
 
 .mapping-table {
 	width: 100%;
-	border-collapse: collapse;
+	border-collapse: separate;
+	border-spacing: 0;
 }
 
 .mapping-table th,
@@ -179,6 +242,14 @@ body {
 .mapping-table th {
 	color: var(--text-secondary);
 	font-weight: 500;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--bg-secondary);
+}
+
+.mapping-table tbody tr:last-child td {
+	border-bottom: none;
 }
 
 .mapping-table select {
@@ -227,6 +298,17 @@ body {
 	flex-wrap: wrap;
 }
 
+.options-row label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+/* 「即将推出」的禁用项 */
+.options-row label.is-disabled {
+	opacity: 0.5;
+}
+
 .options-row select {
 	padding: 3px 6px;
 	border-radius: 4px;
@@ -243,14 +325,26 @@ body {
 	margin-bottom: 6px;
 }
 
+/* 警告行：标签在上、列表在下，列表可滚动以适配固定高度 */
+.preview-line-top {
+	flex-direction: column;
+	align-items: stretch;
+	flex: 1 1 auto;
+	min-height: 0;
+	margin-bottom: 0;
+}
+
 .preview-label {
 	color: var(--text-secondary);
-	min-width: 110px;
 	font-size: 12px;
+	flex: 0 0 auto;
+	min-width: 110px;
 }
 
 .preview-value {
 	font-size: 12px;
+	min-width: 0;
+	word-break: break-word;
 }
 
 .count-chip,
@@ -268,13 +362,16 @@ body {
 	color: var(--text-muted);
 }
 
-ul {
+.preview-warnings {
 	margin: 4px 0 0 18px;
 	padding: 0;
 	color: var(--warn);
+	overflow-y: auto;
+	flex: 1 1 auto;
+	min-height: 0;
 }
 
-ul li {
+.preview-warnings li {
 	font-size: 12px;
 }
 

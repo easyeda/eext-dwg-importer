@@ -6,6 +6,7 @@
 
 import type { DwgLayer, LayerMapping, PcbLayerInfo } from '../../shared/types';
 import { t } from '../../shared/i18n';
+import { need } from './dom';
 import { suggestAllByColor, suggestAllByName } from './layer-suggest-bridge';
 
 export interface LayerMappingSection {
@@ -25,16 +26,16 @@ interface Row {
 const NONE_VALUE = '__none__';
 
 export function createLayerMapping(root: HTMLElement): LayerMappingSection {
-	const tbody = root.querySelector<HTMLTableSectionElement>('[data-role="rows"]')!;
-	const toolbar = root.querySelector<HTMLDivElement>('[data-role="toolbar"]')!;
+	const tbody = need<HTMLTableSectionElement>(root, 'rows');
+	const toolbar = need(root, 'toolbar');
 
-	toolbar.querySelector('[data-role="select-all"]')!.textContent = t('Select all');
-	toolbar.querySelector('[data-role="deselect-all"]')!.textContent = t('Deselect all');
-	toolbar.querySelector('[data-role="by-color"]')!.textContent = t('Match by color');
-	toolbar.querySelector('[data-role="by-name"]')!.textContent = t('Match by name');
-	toolbar.querySelector('[data-role="reset"]')!.textContent = t('Reset');
-	root.querySelector('[data-role="col-dwg"]')!.textContent = 'DWG';
-	root.querySelector('[data-role="col-pcb"]')!.textContent = t('PCB layer');
+	need(toolbar, 'select-all').textContent = t('Select all');
+	need(toolbar, 'deselect-all').textContent = t('Deselect all');
+	need(toolbar, 'by-color').textContent = t('Match by color');
+	need(toolbar, 'by-name').textContent = t('Match by name');
+	need(toolbar, 'reset').textContent = t('Reset');
+	need(root, 'col-dwg').textContent = 'DWG';
+	need(root, 'col-pcb').textContent = t('PCB layer');
 
 	let rows: Row[] = [];
 	let pcbLayers: PcbLayerInfo[] = [];
@@ -110,29 +111,29 @@ export function createLayerMapping(root: HTMLElement): LayerMappingSection {
 		return out;
 	}
 
-	toolbar.querySelector('[data-role="select-all"]')!.addEventListener('click', () => {
+	need(toolbar, 'select-all').addEventListener('click', () => {
 		for (const r of rows) r.enabled = true;
 		render();
 	});
-	toolbar.querySelector('[data-role="deselect-all"]')!.addEventListener('click', () => {
+	need(toolbar, 'deselect-all').addEventListener('click', () => {
 		for (const r of rows) {
 			r.enabled = false;
 			r.targetLayerId = null;
 		}
 		render();
 	});
-	toolbar.querySelector('[data-role="by-color"]')!.addEventListener('click', () => {
+	need(toolbar, 'by-color').addEventListener('click', () => {
 		const mapping = suggestAllByColor(
 			rows.map(r => ({ name: r.layerName, color: r.color })),
 			pcbLayers,
 		);
 		setMapping(mapping);
 	});
-	toolbar.querySelector('[data-role="by-name"]')!.addEventListener('click', () => {
+	need(toolbar, 'by-name').addEventListener('click', () => {
 		const mapping = suggestAllByName(rows.map(r => ({ name: r.layerName })));
 		setMapping(mapping);
 	});
-	toolbar.querySelector('[data-role="reset"]')!.addEventListener('click', () => {
+	need(toolbar, 'reset').addEventListener('click', () => {
 		for (const r of rows) {
 			r.enabled = false;
 			r.targetLayerId = null;

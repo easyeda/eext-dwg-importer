@@ -4,6 +4,7 @@
 
 import type { DwgIR } from '../../shared/types';
 import { t } from '../../shared/i18n';
+import { need } from './dom';
 
 export interface PreviewSection {
 	setIr: (ir: DwgIR) => void;
@@ -22,16 +23,16 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function createPreviewSection(root: HTMLElement): PreviewSection {
-	const bbEl = root.querySelector<HTMLElement>('[data-role="bbox"]')!;
-	const countsEl = root.querySelector<HTMLElement>('[data-role="counts"]')!;
-	const blocksEl = root.querySelector<HTMLElement>('[data-role="blocks"]')!;
-	const warnEl = root.querySelector<HTMLElement>('[data-role="warnings"]')!;
+	const bbEl = need(root, 'bbox');
+	const countsEl = need(root, 'counts');
+	const blocksEl = need(root, 'blocks');
+	const warnEl = need(root, 'warnings');
 
-	root.querySelector('[data-role="title"]')!.textContent = t('Preview');
-	root.querySelector('[data-role="bbox-label"]')!.textContent = t('Bounding box');
-	root.querySelector('[data-role="counts-label"]')!.textContent = t('Entity counts');
-	root.querySelector('[data-role="blocks-label"]')!.textContent = t('Blocks (expanded)');
-	root.querySelector('[data-role="warnings-label"]')!.textContent = t('Warnings');
+	need(root, 'title').textContent = t('Preview');
+	need(root, 'bbox-label').textContent = t('Bounding box');
+	need(root, 'counts-label').textContent = t('Entity counts');
+	need(root, 'blocks-label').textContent = t('Blocks (expanded)');
+	need(root, 'warnings-label').textContent = t('Warnings');
 
 	function formatMm(value: number): string {
 		if (!Number.isFinite(value))
