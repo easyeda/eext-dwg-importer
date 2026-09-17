@@ -12,6 +12,23 @@
 
 import type { DwgPoint } from './types';
 
+/**
+ * EDA 注入的 `eda` 标识符声明。
+ *
+ * EDA 把扩展入口代码包在 `async function (eda) { ... }` 中执行，因此 `eda`
+ * 在运行时可访问，但它是**注入的函数参数**，`globalThis.eda` 并不存在。
+ *
+ * 实测证据（EDA 4.1.46 中执行）：
+ *   typeof globalThis.eda  → "undefined"
+ *   typeof eda             → "object"
+ *
+ * 这里用 `declare const` 表达「外部注入的标识符」，供编译期通过。
+ * 不能写成 declare global（会与 @jlceda/pro-api-types 的 `var eda` 冲突）。
+ *
+ * 注意：打包为 IIFE 后，该标识符仍能解析到外层注入的参数（已验证）。
+ */
+declare const eda: EdaGlobals | undefined;
+
 /** PCB 多边形源数据（与 EPCB 的 L/ARC/CARC/C/R/CIRCLE 指令数组一致）。 */
 export type PcbPolygonSource = Array<'L' | 'ARC' | 'CARC' | 'C' | 'R' | 'CIRCLE' | number>;
 
@@ -63,8 +80,10 @@ export interface EdaGlobals {
 			callbackFn?: (mainButtonClicked: boolean) => void,
 		) => void;
 	};
+	/** 签名对照 pro-api-types：namespace / language 为占位参数，插值参数从第 4 位开始。 */
 	sys_I18n?: {
-		text?: (key: string, ...args: unknown[]) => string;
+		text?: (tag: string, namespace?: string, language?: string, ...args: unknown[]) => string;
+		getCurrentLanguage?: () => Promise<string>;
 	};
 	sys_Storage?: {
 		/** 同步读取；不存在返回 undefined。 */
@@ -224,9 +243,26 @@ export interface EdaGlobals {
 	};
 }
 
-/** 获取 eda 全局对象，类型安全。 */
+/**
+ * 获取 eda 对象，类型安全。
+ *
+ * ⚠️ 关键：EDA 是把扩展入口代码包在 `async function (eda) { ... }` 里执行的，
+ * 也就是说 `eda` 是**注入的函数参数（局部标识符）**，而 `globalThis.eda` 并不存在。
+ *
+ * 实测证据（在 EDA 4.1.46 中执行）：
+ *   typeof globalThis.eda  → "undefined"
+ *   typeof eda             → "object"
+ *
+ * 因此必须引用裸标识符 `eda`。此前用 globalThis.eda 导致所有 API 调用
+ * 静默失败（都走可选链），表现为「点菜单毫无反应、且无任何报错」。
+ *
+ * 实现说明：用 typeof 做存在性判断，避免在非 EDA 环境（如单元测试、
+ * 打包期分析）下抛 ReferenceError；随后直接引用裸 `eda`。
+ */
 export function edaApi(): EdaGlobals | undefined {
-	return (globalThis as unknown as { eda?: EdaGlobals }).eda;
+	if (typeof eda === 'undefined' || eda === null)
+		return undefined;
+	return eda as unknown as EdaGlobals;
 }
 
 /** EPCB_LayerId 真实取值（对照 pro-api-types 核实；不要臆测）。 */

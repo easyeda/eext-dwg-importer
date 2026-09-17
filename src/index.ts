@@ -11,6 +11,7 @@
 import extensionConfig from '../extension.json' with { type: 'json' };
 
 import { importDwg } from './internal/import-dwg';
+import { edaApi } from './shared/eda-api';
 
 const TAG = '[DwgImporter]';
 
@@ -19,14 +20,12 @@ const TAG = '[DwgImporter]';
  *
  * 若点击菜单后连这条都看不到，说明问题在 extension.json 菜单注册或
  * registerFn 名称解析，与导入逻辑无关。
+ *
+ * 注意：必须经 edaApi() 取 eda（它引用 EDA 注入的裸标识符），
+ * 不能用 globalThis.eda —— 后者在 EDA 中并不存在。
  */
 function entryLog(fnName: string, documentType: string): void {
-	const eda = (globalThis as unknown as {
-		eda?: {
-			sys_Log?: { info?: (m: string) => void };
-			sys_Message?: { showToastMessage?: (m: string, t?: unknown, d?: number) => void };
-		};
-	}).eda;
+	const eda = edaApi();
 	const line = `${TAG} ${fnName}() 被调用 (documentType=${documentType})`;
 	try {
 		eda?.sys_Log?.info?.(line);
@@ -44,8 +43,8 @@ export function activate(status?: 'onStartupFinished', arg?: string): void {
 }
 
 export function about(): void {
-	const eda = (globalThis as unknown as { eda?: { sys_Dialog?: { showInformationMessage: (msg: string, title: string) => void }; sys_I18n?: { text: (key: string, ...args: unknown[]) => string } } }).eda;
-	eda?.sys_Dialog?.showInformationMessage(
+	const eda = edaApi();
+	eda?.sys_Dialog?.showInformationMessage?.(
 		`${eda?.sys_I18n?.text?.('DWG Importer v', extensionConfig.version) ?? `DWG Importer v${extensionConfig.version}`}\n${eda?.sys_I18n?.text?.('DWG Importer Description') ?? ''}`,
 		eda?.sys_I18n?.text?.('About DWG Importer') ?? 'About DWG Importer',
 	);
