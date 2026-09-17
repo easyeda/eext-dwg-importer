@@ -1,8 +1,30 @@
 # 技术文档 — DWG Importer for EasyEDA Pro
 
-> 版本：v1.0 (与 PRD v0.3 对齐)
-> 范围：在 PRD 已确认的产品决策之上，给出可实施的技术设计。文档写完后进入编码阶段。
+> 版本：v1.1 (与 PRD v0.3 对齐；已按实测结果修正 iframe 架构与层 id)
+> 范围：在 PRD 已确认的产品决策之上，给出可实施的技术设计。
 > 受众：项目作者本人 + 未来可能的协作者；按文档能 1:1 落地代码。
+
+> **v1.1 重要修正（务必先读）**
+>
+> 初版设计中的若干 API 属于臆测，实测后已推翻，本文档已同步修正：
+>
+> 1. **不存在跨帧消息 API**。`sys_IFrame` 只有 `openIFrame` / `closeIFrame` / `hideIFrame` /
+>    `showIFrame` / `isIFrameAlreadyExist`；初版假设的 `sendMessageToIframe` /
+>    `onIframeMessage` 均不存在（运行时表现为
+>    `Uncaught Error: sys_IFrame.showIFrame is unavailable`）。
+> 2. **iframe 内可直接使用全局 `eda`**，无需 `window.parent`。因此 `transport.ts` /
+>    `protocol.ts` / `messagebus.ts` 已删除，改为 iframe 自包含（见 §3.3、ADR-12）。
+> 3. **`sys_Storage` 是「同步读 / 异步写」**，方法名为 `getExtensionUserConfig` /
+>    `setExtensionUserConfig`，并非 `getItem` / `setItem`。
+> 4. **`sys_Environment.getTheme()` 不存在**（该类只有 `isWeb()` / `isClient()` 等判定）。
+> 5. **层 id 初版全部写错**（例如把 `BOARD_OUTLINE` 写成 2，实际是 11）。
+>    现统一集中在 `src/shared/eda-api.ts` 的 `LAYER` 常量，并对照 `pro-api-types` 核实。
+> 6. **解析库实际是 `@mlightcad/libredwg-web`（GPL-3.0）**，不是初版写的
+>    `@mlightcad/libredwg-bab`（该包在 npm 上不存在）；协议随之改为 GPL-3.0-or-later。
+> 7. **包内资源必须用完整路径**（`/iframe/index.js`），相对路径会加载失败。
+>
+> 教训：凡涉及 `eda.*` 的调用，一律先对照 `node_modules/@jlceda/pro-api-types/index.d.ts`
+> 核实签名，不要凭印象书写。
 
 ---
 
@@ -47,26 +69,33 @@
                        │      src/menu.ts     │
                        │ importDwg(documentType) │
                        └──────────┬───────────┘
-                                  │ opens iframe via
+                                  │ delegates to
+                                  ▼
+                       ┌──────────────────────────────────┐
+                       │   src/internal/import-dwg.ts     │
+                       │  探测文档类型 → 写启动参数        │
+                       │  → sys_IFrame.openIFrame(...)    │
+                       └──────────┬───────────────────────┘
+                                  │ 打开内联框架（无跨帧消息）
                                   ▼
                 ┌─────────────────────────────────┐
-                │      src/iframe/                │
+                │      src/iframe/  （自包含）     │
                 │  ┌───────────┬────────────────┐ │
-                │  │index.html │ src/iframe/    │ │
-                │  │           │ index.ts│
-                │  │           ├─ ui/*         │ │
-                │  │           ├─ dwg/*        │ │
-                │  │           ├─ storage.ts   │ │
-                │  │           └─ protocol.ts  │ │
+                │  │index.html │ index.ts       │ │
+                │  │           ├─ ui/*          │ │
+                │  │           ├─ dwg/*         │ │
+                │  │           └─ storage.ts    │ │
                 │  └────────────────────────────┘ │
+                │  直接调用全局 eda 对象            │
                 └────────────────┬────────────────┘
-                                 │ postMessage 'apply-import'
+                                 │ 直接调用（同一 JS 上下文）
                                  ▼
                        ┌──────────────────────┐
                        │     src/write/       │
                        │  pcb-writer.ts       │
                        │  sch-writer.ts       │
                        │  fp-writer.ts        │
+                       │  （由 iframe 内调用）  │
                        └──────────┬───────────┘
                                   │ uses
                                   ▼
@@ -88,24 +117,26 @@
 |---|---|
 | `src/index.ts` | pro-api-sdk 入口；导出 `activate / importDwgPcb / importDwgSch / importDwgFootprint / about` |
 | `src/menu.ts` | 三个 `registerFn` 全部委托到 `importDwg(documentType)`，不做环境校验 |
-| `src/iframe/index.html` | 弹窗静态壳；只引用 `index.ts` 编译产物 |
-| `src/iframe/index.ts` | 弹窗启动；初始化状态机；建立 MessageBus；分发 UI 事件 |
+| `src/iframe/index.html` | 弹窗静态壳；以**完整路径** `/iframe/index.js` 引用编译产物 |
+| `src/iframe/index.ts` | 弹窗启动；初始化状态机；**直接在 iframe 内完成导入** |
 | `src/iframe/ui/file-section.ts` | 文件选择/拖拽/解析进度/已选文件信息 |
 | `src/iframe/ui/layer-mapping.ts` | 图层列表 + 映射下拉 + 智能建议工具栏 |
 | `src/iframe/ui/options-section.ts` | 实体类型开关 + 线宽 + 单位 + 跳过空图层 |
 | `src/iframe/ui/preview-section.ts` | 实体计数 + 包围盒 + BLOCK 摘要 + warnings |
+| `src/iframe/ui/inject-styles.ts` | 运行时注入 CSS（esbuild 以 text 载入） |
 | `src/iframe/ui/styles.css` | 弹窗样式，CSS 变量驱动的浅/深色主题 |
 | `src/iframe/dwg/parser.ts` | wasm 加载与生命周期；调用 libredwg 解析入口；进度上报 |
 | `src/iframe/dwg/block-expander.ts` | INSERT → 几何副本（含仿射变换） |
 | `src/iframe/dwg/ir.ts` | IR 类型定义；从 libredwg 输出构造 IR |
 | `src/iframe/dwg/layer-suggest.ts` | 智能建议：颜色查表 + 名字归一化 |
 | `src/iframe/dwg/spline-sampler.ts` | 自适应采样（区间 16–128） |
-| `src/iframe/storage.ts` | `sys_Storage` 封装：lastDir / lineWidth / unit |
-| `src/iframe/protocol.ts` | MessageBus 双向类型 |
+| `src/iframe/storage.ts` | `sys_Storage` 封装：lastDir / lineWidth / unit / **启动参数** |
+| `src/internal/import-dwg.ts` | 菜单入口：探测文档类型 → 写启动参数 → `openIFrame` |
 | `src/write/pcb-writer.ts` | IR + mapping + options → PCB Primitive API（PCB / Footprint 共用） |
 | `src/write/sch-writer.ts` | IR + mapping + options → SCH Primitive API |
+| `src/shared/eda-api.ts` | **所有 `eda.*` 的类型契约与层 id 常量**（对照 pro-api-types 核实） |
 | `src/shared/units.ts` | mm/inch ↔ mil；DWG 单位 → mil |
-| `src/shared/types.ts` | 跨进程共享类型（IR 子集、mapping、options） |
+| `src/shared/types.ts` | 共享类型（IR、mapping、options） |
 | `src/shared/i18n.ts` | 文案 key → 当前语言 |
 
 ---
@@ -201,33 +232,59 @@ export interface ApplyImportResult {
 }
 ```
 
-### 3.3 协议消息（iframe ↔ 主进程）
+### 3.3 弹窗启动参数（不使用跨帧消息）
+
+> **重要修正**：本节早期版本设计了 `sendMessageToIframe` / `onIframeMessage` 双向协议。
+> 经对照 `@jlceda/pro-api-types` 与官方 `iframe_custom_ui` 文档核实，**这两个 API 并不存在**，
+> `SYS_IFrame` 仅有 `openIFrame` / `closeIFrame` / `hideIFrame` / `showIFrame` / `isIFrameAlreadyExist`。
+> 同时官方文档明确：**iframe 内可直接访问全局 `eda` 对象，无需 `window.parent`**。
+> 因此现在的设计是「iframe 自包含」，没有消息层。
 
 ```ts
-// src/iframe/protocol.ts
+// src/iframe/storage.ts
+export const KEY_LAUNCH = 'dwg-importer.launch';
 
-export type HostToIframe =
-  | { type: 'init'; documentType: ImportDocumentType; theme: 'light' | 'dark' }
-  | { type: 'apply-result'; result: ApplyImportResult };
-
-export type IframeToHost =
-  | { type: 'ready' }
-  | { type: 'parse-progress'; percent: number }
-  | { type: 'apply-import'; payload: ApplyImportPayload }
-  | { type: 'cancel' };
-
-export interface ProtocolMessageMap {
-  host: HostToIframe;
-  iframe: IframeToHost;
+export interface LaunchParams {
+  documentType: 'PCB' | 'SCH' | 'FOOTPRINT';
 }
 ```
 
-实现说明：
-- 主进程 → iframe：通过 `eda.sys_IFrame.sendMessageToIframe(json)`；iframe 用 `window.addEventListener('message', ...)` 接收，校验 `event.data.type` 命中 `HostToIframe`。
-- iframe → 主进程：经 `eda.sys_IFrame.onIframeMessage((data) => ...)` 接收；iframe 内部用 `window.parent.postMessage(json, '*')`。
-- 大载荷（`apply-import`）通过**结构化克隆**序列化（postMessage 原生支持），无需手动 `JSON.stringify`；主进程收到后立即冻结（避免污染）。
+数据传递方式：
+- **host → iframe**：`openIFrame` **不支持 query 参数**，故启动参数经
+  `eda.sys_Storage.setExtensionUserConfig(KEY_LAUNCH, { documentType })` 写入，
+  iframe 启动时用 `getExtensionUserConfig(KEY_LAUNCH)`（**同步**）读取。
+- **iframe → host**：**不需要**。iframe 自行完成解析与写图元，结束后调用
+  `eda.sys_IFrame.closeIFrame('dwg-importer-window')` 关闭自身。
+- 失败与结果反馈直接用 `eda.sys_Message.showToastMessage` / `eda.sys_Log`。
 
-### 3.4 共享层 API 关键签名
+### 3.4 弹窗打开与关闭（host 侧）
+
+```ts
+// src/internal/import-dwg.ts
+const IFRAME_HTML = '/iframe/index.html';   // 扩展包内完整路径
+const IFRAME_ID = 'dwg-importer-window';    // 固定 id，便于重复打开时先关闭旧窗口
+
+// 1. 探测真实文档类型（菜单传入值可能与当前文档不一致）
+const info = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+//    documentType: PCB=3 / SCHEMATIC_PAGE=1 / FOOTPRINT=4
+
+// 2. 写启动参数
+await eda.sys_Storage.setExtensionUserConfig(KEY_LAUNCH, { documentType });
+
+// 3. 打开窗口
+await eda.sys_IFrame.openIFrame(IFRAME_HTML, 760, 660, IFRAME_ID, {
+  title: 'DWG 导入器',
+  maximizeButton: false,
+  minimizeButton: false,
+});
+```
+
+注意：
+- `openIFrame` 返回 `Promise<boolean>`，`false` 表示打开失败。
+- 重复点击菜单时先 `isIFrameAlreadyExist(id)` → `closeIFrame(id)`，避免多开。
+- **HTML 内的资源路径必须写成包内完整路径**（如 `/iframe/index.js`），相对路径会加载失败。
+
+### 3.5 共享层 API 关键签名
 
 ```ts
 // src/iframe/storage.ts
@@ -398,24 +455,34 @@ export function suggestPcbLayer(
 
 ### 5.2 时序图：完整导入一次
 
+> 无跨帧消息：host 只负责打开窗口，之后全部由 iframe 直接调用 `eda` 完成。
+
 ```
-User              Iframe                Host (src/menu.ts)              EDA
- │                  │                            │                        │
- │ open menu        │                            │                        │
- │                  │                            │ sys_IFrame.showIFrame ─→│
- │                  │ ◄──────────── init ────────│ ───────────────────────│
- │                  │── ready ──────────────────→│                        │
- │ drag/select file │                            │                        │
- │                  │ parse-file (in iframe)     │                        │
- │                  │── parse-progress (×N) ─────→│ (ignored; for log)     │
- │                  │                            │                        │
- │ edit mapping     │                            │                        │
- │ click 导入       │                            │                        │
- │                  │── apply-import ───────────→│                        │
- │                  │                            │ pcb_Primitive*.create →│
- │                  │                            │ (批量，Promise.all)    │
- │                  │ ◄────── apply-result ──────│ ◄─── result ───────────│
- │ toast/close      │                            │                        │
+User            Host (import-dwg.ts)        EDA / iframe (共享同一 JS 上下文)
+ │                    │                              │
+ │ click 菜单         │                              │
+ │                    │ dmt_SelectControl            │
+ │                    │   .getCurrentDocumentInfo() →│
+ │                    │◄──── documentType ───────────│
+ │                    │ setExtensionUserConfig(      │
+ │                    │   KEY_LAUNCH, {...})        →│
+ │                    │ openIFrame('/iframe/index   →│
+ │                    │   .html', 760, 660, id, {})  │
+ │                    │◄──── true/false ─────────────│
+ │                    │  (host 职责结束，返回)         │
+ │                    │                              │
+ │                    │        iframe 启动            │
+ │                    │        getExtensionUserConfig│
+ │                    │          (KEY_LAUNCH) 同步读  │
+ │ drag/select DWG    │        parseDwg() (wasm)     │
+ │ edit mapping       │        applyPcb/SchImport()  │
+ │ click 导入         │            │                 │
+ │                    │            │ pcb_Primitive*  │
+ │                    │            │  .create() ────→│
+ │                    │            │◄── result ──────│
+ │                    │        showToastMessage(结果) │
+ │                    │        closeIFrame(自身)      │
+ │◄─── 弹窗关闭，画布显示导入结果 ──────────────────────│
 ```
 
 ### 5.3 关键约束
@@ -632,16 +699,21 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 | ID | 决策 | 备选 | 拒绝理由 |
 |---|---|---|---|
 | ADR-1 | wasm 随 eext 打包，不走 CDN | 动态从 CDN 加载 | 易受网络/CDN 故障影响；首次进入弹窗体验差；离线不可用 |
-| ADR-2 | 解析在 iframe 内完成，主进程只写图元 | 解析在主进程 | 主进程包体积膨胀；iframe 沙箱已能加载 wasm |
+| ADR-2 | **解析与写图元全部在 iframe 内完成，无跨帧通信** | 主进程与 iframe 分工 + 消息层 | 见 ADR-12：EDA 无跨帧消息 API，且 iframe 可直接用 `eda` |
 | ADR-3 | SPLINE 自适应采样，区间 16–128 段 | 固定 64 段 | 自适应在低曲率处更省、在高曲率处更准 |
 | ADR-4 | BLOCK 二次遍历作为 fallback（若库不支持原生展开） | 仅依赖库原生展开 | 部分 libredwg 版本不支持；二次遍历保证跨版本稳定 |
-| ADR-5 | 仓库协议升级为 GPL-2.0-or-later | 保持 Apache-2.0 | libredwg 是 GPLv2，分发 wasm 时整体需兼容 |
+| ADR-5 | 仓库协议为 **GPL-3.0-or-later** | 保持 Apache-2.0；或 GPL-2.0 | 实际解析库 `@mlightcad/libredwg-web` 为 **GPL-3.0**，GPL-2.0 与之不兼容 |
 | ADR-6 | 弹窗内原生 DOM + CSS，无框架 | 引入 React/Vue | 包体敏感；交互简单无需框架 |
 | ADR-7 | 菜单静态注册（`extension.json.headerMenus`），无运行时切换 | `sys_HeaderMenu.insertHeaderMenus` 动态 | EDA 框架已自动按环境显隐；运行时切换引入不必要复杂性 |
 | ADR-8 | 菜单项在三种编辑器分别用独立 ID（`dwg-importer.pcb / .schematic / .footprint`） | 三套 ID 一致 | EDA 不允许 ID 跨扩展冲突，独立 ID 更安全 |
 | ADR-9 | 不注册快捷键 | 注册 Ctrl+Shift+I 等 | DWG 导入是低频操作；占用通用快捷键得不偿失 |
-| ADR-10 | POLYLINE 按实际顶点数输出 | 固定 32 点上限分拆 | 减少代码复杂度；EDA 实际是否有上限在 §9.4 实测验证 |
+| ADR-10 | POLYLINE 转 `['L', x, y, ...]` 源数组后经 `pcb_MathPolygon.createPolygon` 构造 | 直接传点数组 | `PrimitivePolyline.create` 要求 `IPCB_Polygon` 对象，不接受裸点数组 |
 | ADR-11 | lastDir 仅作 toast 提示，不主动改变 defaultPath | 用 chrome.downloads 等扩展 API | EDA 沙箱不支持；toast 是稳妥降级 |
+| ADR-12 | **iframe 内直接调用 `eda`，不引入跨帧消息层** | 自定义 `sendMessageToIframe` / `onIframeMessage` 桥接 | 这两个 API 经核实**不存在**；官方文档明确 iframe 可直接使用 `eda`，无需要 `window.parent`。移除 `transport.ts` / `protocol.ts` / `messagebus.ts` 三个模块 |
+| ADR-13 | 启动参数经 `sys_Storage` 传递 | URL query 参数 / postMessage | `openIFrame` 明确不支持 query 参数，且无消息通道 |
+| ADR-14 | 包内资源使用完整路径（`/iframe/index.js`） | 相对路径 `./index.js` | 官方文档明确要求完整路径；相对路径会加载失败 |
+| ADR-15 | 层 id 全部对照 `pro-api-types` 核实并集中到 `shared/eda-api.ts` | 在各模块内联魔数 | 早期硬编码的层 id 全部错误（如把 `BOARD_OUTLINE` 写成 2，实为 11），集中管理便于核对 |
+| ADR-16 | 仓库根 `vendor/` 通过 `.edaignore` 排除出扩展包 | 一并打包 | 运行时有 `dist/vendor/` 一份即可；两份会让 wasm 重复，包体从 2.29 MB 涨到 4.52 MB |
 
 ---
 
@@ -687,107 +759,83 @@ export function importDwgFootprint(): Promise<void> {
 export const __test__ = { importDwg };
 ```
 
-### 12.3 `src/internal/import-dwg.ts`（核心编排）
+### 12.3 `src/internal/import-dwg.ts`（菜单入口，已实现）
 
 ```ts
-import { showIframe, sendToIframe, onIframeMessage } from '../iframe/transport.ts';
-import { applyPcbImport, applySchImport, applyFootprintImport } from '../write/index.ts';
-import type { ImportDocumentType, ApplyImportPayload, ApplyImportResult } from '../shared/types.ts';
+import { DOC_TYPE, edaApi } from '../shared/eda-api';
+import { KEY_LAUNCH } from '../iframe/storage';
+
+const IFRAME_HTML = '/iframe/index.html';   // 扩展包内完整路径
+const IFRAME_ID = 'dwg-importer-window';
 
 export async function importDwg(documentType: ImportDocumentType): Promise<void> {
-  const theme = await getTheme();
-  const iframeId = await eda.sys_IFrame.showIFrame({ /* opts */ });
+  const eda = edaApi();
+  const iframeApi = eda?.sys_IFrame;
+  if (!iframeApi?.openIFrame) {
+    eda?.sys_Dialog?.showInformationMessage?.('当前环境不支持内联框架', 'DWG 导入器');
+    return;
+  }
 
-  const readyPromise = new Promise<void>((resolve) => {
-    onIframeMessage((data) => {
-      if (data.type === 'ready') resolve();
-    });
+  // 用真实文档类型覆盖菜单传入值
+  const effective = (await detectDocumentType()) ?? documentType;
+
+  // 重复点击时先关旧窗口，避免多开
+  if (await iframeApi.isIFrameAlreadyExist?.(IFRAME_ID)) {
+    await iframeApi.closeIFrame?.(IFRAME_ID);
+  }
+
+  // openIFrame 不支持 query 参数，启动参数经 Storage 传递
+  await eda?.sys_Storage?.setExtensionUserConfig?.(KEY_LAUNCH, { documentType: effective });
+
+  const opened = await iframeApi.openIFrame(IFRAME_HTML, 760, 660, IFRAME_ID, {
+    title: 'DWG 导入器',
   });
-  await readyPromise;
-
-  sendToIframe(iframeId, { type: 'init', documentType, theme });
-
-  const applyPromise = new Promise<ApplyImportResult>((resolve, reject) => {
-    onIframeMessage((data) => {
-      if (data.type === 'apply-import') {
-        applyImport(data.payload as ApplyImportPayload).then(resolve, reject);
-      }
-      if (data.type === 'cancel') {
-        resolve({ successCount: 0, failedCount: 0, errors: [] });
-      }
-    });
-  });
-
-  const result = await applyPromise;
-  sendToIframe(iframeId, { type: 'apply-result', result });
-  await eda.sys_IFrame.closeIFrame(iframeId);
-}
-
-async function applyImport(payload: ApplyImportPayload): Promise<ApplyImportResult> {
-  switch (payload.documentType) {
-    case 'PCB':       return applyPcbImport(payload, () => {});
-    case 'FOOTPRINT': return applyFootprintImport(payload, () => {});
-    case 'SCH':       return applySchImport(payload, () => {});
+  if (!opened) {
+    eda?.sys_Dialog?.showInformationMessage?.(`无法打开弹窗（${IFRAME_HTML}）`, 'DWG 导入器');
   }
 }
+// 之后无任何 host↔iframe 交互：导入由 iframe 自行完成。
 ```
 
-### 12.4 `src/iframe/index.ts`（入口骨架）
+### 12.4 `src/iframe/index.ts`（弹窗入口，已实现）
 
 ```ts
-import { createStateMachine } from './state-machine.ts';
-import { createFileSection } from './ui/file-section.ts';
-import { createLayerMapping } from './ui/layer-mapping.ts';
-import { createOptionsSection } from './ui/options-section.ts';
-import { createPreviewSection } from './ui/preview-section.ts';
-import { parseDwg } from './dwg/parser.ts';
-import { createStorage } from './storage.ts';
-import { sendToHost, onHostMessage, type ProtocolMessage } from './protocol.ts';
-import { suggestPcbLayer } from './dwg/layer-suggest.ts';
+import { DOC_TYPE, LAYER, edaApi } from '../shared/eda-api';
+import { parseDwg } from './dwg/parser';
+import { applyPcbImport, applySchImport, applyFootprintImport } from '../write/index';
+import { createIframeStorage } from './storage';
 
-const root = document.getElementById('app')!;
-const fileSec   = createFileSection(root.querySelector('#file-section')!);
-const layerMap  = createLayerMapping(root.querySelector('#layer-mapping')!);
-const options   = createOptionsSection(root.querySelector('#options-section')!);
-const preview   = createPreviewSection(root.querySelector('#preview-section')!);
-const importBtn = root.querySelector<HTMLButtonElement>('#import-btn')!;
+// 1) 读启动参数（同步）→ 决定目标层清单；读不到则自行探测
+const docType = storage.getLaunchParams()?.documentType
+  ?? await detectDocumentType() ?? 'PCB';
 
-const sm = createStateMachine({ idle: {}, parsed: {}, importing: {}, done: {}, error: {} });
-const storage = createStorage();
-
-// 监听 host 消息
-onHostMessage((msg) => {
-  if (msg.type === 'init') {
-    // 设置主题、documentType，影响 layer-mapping 可选 PCB 层列表
-  }
-  if (msg.type === 'apply-result') {
-    sm.transition('done');
-    eda.sys_Message.showToastMessage(`导入完成：${msg.result.successCount} 个图元`);
-  }
-});
-
-// 通知 host ready
-sendToHost({ type: 'ready' });
-
+// 2) 文件选择 → 解析 → 智能建议
 fileSec.onFileSelected(async (file) => {
   sm.transition('parsing');
-  const ir = await parseDwg(file, (p) => sendToHost({ type: 'parse-progress', percent: p }));
-  layerMap.setIr(ir, suggestPcbLayer);
-  preview.setIr(ir);
+  const ir = await parseDwg(file, { onProgress: p => fileSec.setStatusParsing(p) });
+  layerMap.setLayers(ir.layers, targetLayers);
+  layerMap.setMapping(suggest(ir));          // 名字优先，回退颜色
+  previewSec.setIr(ir);
   sm.transition('parsed');
 });
 
-importBtn.addEventListener('click', () => {
+// 3) 点击导入 → 直接在 iframe 内写图元（无跨帧调用）
+importBtn.addEventListener('click', async () => {
   sm.transition('importing');
-  sendToHost({
-    type: 'apply-import',
-    payload: {
-      ir: layerMap.getIr(),
-      mapping: layerMap.getMapping(),
-      options: options.getOptions(),
-      documentType: /* from init msg */,
-    },
-  });
+  const payload = {
+    ir: currentIr!,
+    mapping: layerMap.getMapping(),
+    options: optionsSec.getOptions(),
+    documentType: docType,
+  };
+  const result = docType === 'SCH'
+    ? await applySchImport(payload, onProgress)
+    : docType === 'FOOTPRINT'
+      ? await applyFootprintImport(payload, onProgress)
+      : await applyPcbImport(payload, onProgress);
+
+  edaApi()?.sys_Message?.showToastMessage?.(`导入完成：${result.successCount} 个图元`);
+  setTimeout(() => void edaApi()?.sys_IFrame?.closeIFrame?.('dwg-importer-window'), 600);
 });
 ```
 

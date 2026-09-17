@@ -5,19 +5,32 @@
  *
  * 单位：EDA PCB 数据层单位是 mil；DWG 坐标按 IR.units 换算。
  * 角度：EDA ARC 用角度，DWG ARC 用弧度。
+ *
+ * API 形状对照 pro-api-types 核实（不要臆测）：
+ * - Line.create(net, layer, x1, y1, x2, y2, lineWidth?, locked?)
+ * - Polyline.create(net, layer, polygon: IPCB_Polygon, lineWidth?, locked?)
+ * - Region.create(layer, complexPolygon: IPCB_ComplexPolygon, ruleType?, name?, lineWidth?, locked?)
+ * - Arc.create(net, layer, startX, startY, endX, endY, arcAngle, lineWidth?, mode?, locked?)
+ *     注意 Arc 用「两端点 + 圆弧角」，不是「圆心 + 半径 + 起止角」。
+ * - String.create(layer, x, y, text, fontFamily, fontSize, lineWidth, alignMode,
+ *                 rotation, reverse, expansion, mirror, locked)
+ * 多边形通过 eda.pcb_MathPolygon.createPolygon(['L', x1, y1, x2, y2, ...]) 构造。
  */
 
+import type { PcbPolygonSource } from '../shared/eda-api';
 import type {
 	ApplyImportPayload,
 	ApplyImportResult,
 	DwgEntity,
-	DwgPoint,
 	LayerMapping,
 } from '../shared/types';
 import { edaApi } from '../shared/eda-api';
 import { dwgToMil, radToDeg } from '../shared/units';
 
 const BATCH = 50;
+/** EPCB_PrimitiveStringAlignMode：左对齐。 */
+const STRING_ALIGN_LEFT = 0;
+const DEFAULT_FONT = 'Arial';
 
 export async function applyPcbImport(
 	payload: ApplyImportPayload,
@@ -57,6 +70,7 @@ async function writeOne(e: DwgEntity, ctx: WriteContext, result: ApplyImportResu
 	const eda = edaApi();
 	if (!eda)
 		return;
+
 	const targetLayer = ctx.mapping[e.layer];
 	if (targetLayer === undefined || targetLayer === null)
 		return;
@@ -65,62 +79,88 @@ async function writeOne(e: DwgEntity, ctx: WriteContext, result: ApplyImportResu
 	if (!ctx.enabled.has(e.kind))
 		return;
 
+	const X = (v: number): number => dwgToMil(v, ctx.units);
+	const mkPolygon = (points: Array<{ x: number; y: number }>): PcbPolygonSource | undefined => {
+		if (points.length < 2)
+			return undefined;
+		const src: PcbPolygonSource = ['L'];
+		for (const p of points) {
+			src.push(X(p.x), X(p.y));
+		}
+		return src;
+	};
+
 	try {
 		switch (e.kind) {
 			case 'LINE':
 				await eda.pcb_PrimitiveLine?.create?.(
 					'',
 					targetLayer,
-					dwgToMil(e.start.x, ctx.units),
-					dwgToMil(e.start.y, ctx.units),
-					dwgToMil(e.end.x, ctx.units),
-					dwgToMil(e.end.y, ctx.units),
+					X(e.start.x),
+					X(e.start.y),
+					X(e.end.x),
+					X(e.end.y),
 					ctx.width,
 					false,
 				);
 				break;
-			case 'CIRCLE': {
-				const pts = circleAsPolyline(e.center, e.radius, ctx);
-				await eda.pcb_PrimitivePolyline?.create?.(pts, ctx.width, targetLayer, false);
+
+			case 'ARC': {
+				// EDA 的 ARC 需要两端点 + 圆弧角，故先由圆心/半径/起止角算出两端点。
+				const p1 = pointOnCircle(e.center, e.radius, e.startAngle);
+				const p2 = pointOnCircle(e.center, e.radius, e.endAngle);
+				let sweepDeg = radToDeg(e.endAngle - e.startAngle);
+				// 归一化到 (-360, 360)，负值表示顺时针。
+				while (sweepDeg > 360) sweepDeg -= 360;
+				while (sweepDeg < -360) sweepDeg += 360;
+				await eda.pcb_PrimitiveArc?.create?.(
+					'',
+					targetLayer,
+					X(p1.x),
+					X(p1.y),
+					X(p2.x),
+					X(p2.y),
+					sweepDeg,
+					ctx.width,
+					undefined,
+					false,
+				);
 				break;
 			}
-			case 'ARC':
-				await eda.pcb_PrimitiveArc?.create?.(
-					targetLayer,
-					dwgToMil(e.center.x, ctx.units),
-					dwgToMil(e.center.y, ctx.units),
-					dwgToMil(e.radius, ctx.units),
-					radToDeg(e.startAngle),
-					radToDeg(e.endAngle),
-					ctx.width,
-					'',
-					false,
-				);
-				break;
+
+			case 'CIRCLE':
 			case 'LWPOLYLINE':
 			case 'POLYLINE':
 			case 'SPLINE': {
-				const pts = e.points.map(p => ({
-					x: dwgToMil(p.x, ctx.units),
-					y: dwgToMil(p.y, ctx.units),
-				}));
-				if (e.closed && pts.length > 0 && pts.length <= 256) {
-					await eda.pcb_PrimitiveRegion?.create?.(pts, targetLayer, false);
-				}
-				else {
-					await eda.pcb_PrimitivePolyline?.create?.(pts, ctx.width, targetLayer, false);
-				}
+				const pts = e.kind === 'CIRCLE'
+					? circlePoints(e.center, e.radius, 64)
+					: e.points;
+				const src = mkPolygon(pts);
+				if (!src)
+					break;
+				const polygon = eda.pcb_MathPolygon?.createPolygon?.(src);
+				if (!polygon)
+					break;
+				await eda.pcb_PrimitivePolyline?.create?.('', targetLayer, polygon, ctx.width, false);
 				break;
 			}
+
 			case 'TEXT':
 			case 'MTEXT':
 				await eda.pcb_PrimitiveString?.create?.(
-					dwgToMil(e.position.x, ctx.units),
-					dwgToMil(e.position.y, ctx.units),
-					e.content,
 					targetLayer,
-					dwgToMil(e.height, ctx.units) * 0.8,
+					X(e.position.x),
+					X(e.position.y),
+					e.content,
+					DEFAULT_FONT,
+					// EDA 的 font 尺寸语义与 DWG 文本高度不同，取 0.8 系数做视觉对齐。
+					Math.max(1, X(e.height) * 0.8),
+					ctx.width,
+					STRING_ALIGN_LEFT,
 					radToDeg(e.rotation),
+					false,
+					0,
+					false,
 					false,
 				);
 				break;
@@ -133,19 +173,19 @@ async function writeOne(e: DwgEntity, ctx: WriteContext, result: ApplyImportResu
 	}
 }
 
-function circleAsPolyline(
-	center: DwgPoint,
-	radius: number,
-	ctx: WriteContext,
-	segments = 32,
-): DwgPoint[] {
-	const pts: DwgPoint[] = [];
+function pointOnCircle(center: { x: number; y: number }, radius: number, angleRad: number): { x: number; y: number } {
+	return {
+		x: center.x + Math.cos(angleRad) * radius,
+		y: center.y + Math.sin(angleRad) * radius,
+	};
+}
+
+function circlePoints(center: { x: number; y: number }, radius: number, segments: number): Array<{ x: number; y: number }> {
+	const pts: Array<{ x: number; y: number }> = [];
 	for (let i = 0; i < segments; i++) {
-		const a = (i / segments) * Math.PI * 2;
-		pts.push({
-			x: dwgToMil(center.x + Math.cos(a) * radius, ctx.units),
-			y: dwgToMil(center.y + Math.sin(a) * radius, ctx.units),
-		});
+		pts.push(pointOnCircle(center, radius, (i / segments) * Math.PI * 2));
 	}
+	// 闭合
+	pts.push(pts[0]!);
 	return pts;
 }

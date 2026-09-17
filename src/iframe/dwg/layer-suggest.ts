@@ -3,44 +3,42 @@
  *
  * 约定（DWG 机械图常用命名）：
  * - BOARD_OUTLINE / OUTLINE / WIREFRAME   → BoardOutline
- * - DIM* / DIMENSION                      → Mechanical5
- * - SILK* / PLACE*                        → TopSilkLayer
+ * - DIM* / DIMENSION                      → Mechanical
+ * - SILK* / PLACE*                        → Top/BottomSilkscreen
  * - DOC* / NOTE* / TEXT                   → Document
  */
 
 import type { PcbLayerInfo, Rgb } from '../../shared/types';
 
-/** EDA EPCB_LayerId 枚举的常用字面量（与 pro-api-types 对齐）。 */
+/**
+ * 目标 PCB 层 id。
+ *
+ * 取值对照 @jlceda/pro-api-types 的 EPCB_LayerId 核实：
+ * TOP=1, BOTTOM=2, TOP_SILKSCREEN=3, BOTTOM_SILKSCREEN=4,
+ * BOARD_OUTLINE=11, DOCUMENT=13, MECHANICAL=14。
+ *
+ * 注意：MECHANICAL(14) 在 EDA 侧是“机械层”这一大类，
+ * 具体编号层由用户在画布层设置中决定，这里统一映射到 14。
+ */
 export const PCB_LAYER_ID = {
-	BoardOutline: 2,
 	TopLayer: 1,
-	BottomLayer: 30,
-	TopSilkLayer: 4,
-	BottomSilkLayer: 7,
-	Document: 12,
-	Mechanical1: 36,
-	Mechanical2: 37,
-	Mechanical3: 38,
-	Mechanical4: 39,
-	Mechanical5: 40,
-	Mechanical6: 41,
-	Mechanical7: 42,
-	Mechanical8: 43,
-	Mechanical9: 44,
-	Mechanical10: 45,
-	Mechanical11: 46,
-	Mechanical12: 47,
-	Mechanical13: 48,
-	Mechanical14: 49,
-	Mechanical15: 50,
+	BottomLayer: 2,
+	TopSilkLayer: 3,
+	BottomSilkLayer: 4,
+	BoardOutline: 11,
+	Document: 13,
+	Mechanical: 14,
 } as const;
 
 const NAME_RULES: Array<{ pattern: RegExp; layerId: number }> = [
-	{ pattern: /^(board[_-]?outline|outline|wireframe)$/i, layerId: PCB_LAYER_ID.BoardOutline },
-	{ pattern: /^(dim|dimension|dim[_-]?line)$/i, layerId: PCB_LAYER_ID.Mechanical5 },
-	{ pattern: /^(top[_-]?silk|silk[_-]?top|place[_-]?top)$/i, layerId: PCB_LAYER_ID.TopSilkLayer },
-	{ pattern: /^(bot(tom)?[_-]?silk|silk[_-]?bot(tom)?|place[_-]?bot(tom)?)$/i, layerId: PCB_LAYER_ID.BottomSilkLayer },
-	{ pattern: /^(doc|note|text|annotation|comment)$/i, layerId: PCB_LAYER_ID.Document },
+	{ pattern: /^(board[_-]?outline|outline|wireframe|board)$/i, layerId: PCB_LAYER_ID.BoardOutline },
+	{ pattern: /^(dime?nsion.*|dim|dim[_-]?line)$/i, layerId: PCB_LAYER_ID.Mechanical },
+	{ pattern: /^(top[_-]?silk|silk[_-]?top|place[_-]?top|silkscreen[_-]?top)$/i, layerId: PCB_LAYER_ID.TopSilkLayer },
+	{ pattern: /^(bot(tom)?[_-]?silk|silk[_-]?bot(tom)?|place[_-]?bot(tom)?|silkscreen[_-]?bot(tom)?)$/i, layerId: PCB_LAYER_ID.BottomSilkLayer },
+	{ pattern: /^(doc|note|text|annotation|comment|title)$/i, layerId: PCB_LAYER_ID.Document },
+	{ pattern: /^(mechanical|mech([_-]?\d+)?)$/i, layerId: PCB_LAYER_ID.Mechanical },
+	{ pattern: /^(top|toplayer|signal[_-]?top|copper[_-]?top)$/i, layerId: PCB_LAYER_ID.TopLayer },
+	{ pattern: /^(bot(tom)?|botlayer|signal[_-]?bot(tom)?|copper[_-]?bot(tom)?)$/i, layerId: PCB_LAYER_ID.BottomLayer },
 ];
 
 /** ACI 颜色 → 0..255 RGB。ACI 0/256 = byblock，1..255 是索引。 */

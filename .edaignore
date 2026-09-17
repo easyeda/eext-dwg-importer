@@ -21,3 +21,6 @@ debug.log
 /scripts/
 /.sdk-manifest.json
 /.npm-cache/
+# 运行时只读取 dist/ 下由构建复制的那一份；
+# 仓库根 vendor/ 是同步来源，不需要打进扩展包（否则 wasm 会重复一份，包体翻倍）。
+/vendor/

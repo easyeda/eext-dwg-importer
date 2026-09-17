@@ -3,9 +3,15 @@
  *
  * 单位：SCH 数据层单位是 0.01 inch (= 10 mil)，写图元前做单位换算。
  *
- * EDA SCH 图元类型与 PCB 略有不同；本 v1 实现支持 LINE / POLYLINE / CIRCLE / ARC / TEXT。
- * sch_PrimitiveWire (for LINE)、sch_PrimitivePolygon (for polyline/circle)、
- * sch_PrimitiveArc、sch_PrimitiveText 是常用 API。
+ * API 形状对照 pro-api-types 核实：
+ * - Wire.create(line: number[] | number[][], net?, color?, lineWidth?, lineType?)
+ * - Polygon.create(line: number[], color?, fillColor?, lineWidth?, lineType?)
+ * - Circle.create(cx, cy, radius, color?, fillColor?, lineWidth?, lineType?, fillStyle?)
+ * - Arc.create(startX, startY, referenceX, referenceY, endX, endY, ...)
+ *     即「起点 + 参考点（圆心）+ 终点」，不是圆心/半径/角度。
+ * - Text.create(x, y, content, rotation?, textColor?, fontName?, fontSize?, ...)
+ *
+ * line 参数为扁平坐标数组 [x1, y1, x2, y2, ...]。
  */
 
 import type {
@@ -23,17 +29,17 @@ export async function applySchImport(
 ): Promise<ApplyImportResult> {
 	const result: ApplyImportResult = { successCount: 0, failedCount: 0, errors: [] };
 	const total = payload.ir.entities.length;
-	const ctx = {
+	const ctx: SchCtx = {
 		units: payload.options.units === 'auto' ? payload.ir.units : payload.options.units,
 		enabled: payload.options.enabledKinds,
 		mapping: payload.mapping,
 		emptyLayers: new Set(payload.ir.layers.filter(l => l.entityCount === 0).map(l => l.name)),
 		skipEmpty: payload.options.skipEmptyLayers,
+		lineWidth: payload.options.defaultLineWidthMil / MIL_PER_100TH_INCH,
 	};
 
 	for (let i = 0; i < total; i++) {
-		const e = payload.ir.entities[i]!;
-		await writeSchOne(e, ctx, result);
+		await writeSchOne(payload.ir.entities[i]!, ctx, result);
 		if (i % 10 === 0)
 			onProgress(i, total);
 	}
@@ -47,6 +53,7 @@ interface SchCtx {
 	mapping: Record<string, number | null>;
 	emptyLayers: Set<string>;
 	skipEmpty: boolean;
+	lineWidth: number;
 }
 
 function toSchUnit(valueInDwg: number, units: SchCtx['units']): number {
@@ -57,6 +64,7 @@ async function writeSchOne(e: DwgEntity, ctx: SchCtx, result: ApplyImportResult)
 	const eda = edaApi();
 	if (!eda)
 		return;
+
 	const targetLayer = ctx.mapping[e.layer];
 	if (targetLayer === undefined || targetLayer === null)
 		return;
@@ -65,48 +73,71 @@ async function writeSchOne(e: DwgEntity, ctx: SchCtx, result: ApplyImportResult)
 	if (!ctx.enabled.has(e.kind))
 		return;
 
+	const U = (v: number): number => toSchUnit(v, ctx.units);
+
 	try {
 		switch (e.kind) {
 			case 'LINE':
 				await eda.sch_PrimitiveWire?.create?.(
-					toSchUnit(e.start.x, ctx.units),
-					toSchUnit(e.start.y, ctx.units),
-					toSchUnit(e.end.x, ctx.units),
-					toSchUnit(e.end.y, ctx.units),
+					[U(e.start.x), U(e.start.y), U(e.end.x), U(e.end.y)],
+					undefined,
+					null,
+					ctx.lineWidth,
 				);
 				break;
+
 			case 'CIRCLE':
+				await eda.sch_PrimitiveCircle?.create?.(
+					U(e.center.x),
+					U(e.center.y),
+					U(e.radius),
+					null,
+					null,
+					ctx.lineWidth,
+				);
+				break;
+
+			case 'ARC': {
+				// SCH ARC 需要「起点 + 参考点（圆心）+ 终点」。
+				const p1 = pointOnCircle(e.center, e.radius, e.startAngle);
+				const p2 = pointOnCircle(e.center, e.radius, e.endAngle);
+				await eda.sch_PrimitiveArc?.create?.(
+					U(p1.x),
+					U(p1.y),
+					U(e.center.x),
+					U(e.center.y),
+					U(p2.x),
+					U(p2.y),
+					null,
+					null,
+					ctx.lineWidth,
+				);
+				break;
+			}
+
 			case 'LWPOLYLINE':
 			case 'POLYLINE':
 			case 'SPLINE': {
-				const pts = collectPolylinePoints(e);
-				if (pts.length > 0) {
-					await eda.sch_PrimitivePolygon?.create?.(
-						pts.map(p => ({
-							x: toSchUnit(p.x, ctx.units),
-							y: toSchUnit(p.y, ctx.units),
-						})),
-					);
+				if (e.points.length < 2)
+					break;
+				const flat: number[] = [];
+				for (const p of e.points) {
+					flat.push(U(p.x), U(p.y));
 				}
+				await eda.sch_PrimitivePolygon?.create?.(flat, null, null, ctx.lineWidth);
 				break;
 			}
-			case 'ARC':
-				await eda.sch_PrimitiveArc?.create?.(
-					toSchUnit(e.center.x, ctx.units),
-					toSchUnit(e.center.y, ctx.units),
-					toSchUnit(e.radius, ctx.units),
-					radToDeg(e.startAngle),
-					radToDeg(e.endAngle),
-				);
-				break;
+
 			case 'TEXT':
 			case 'MTEXT':
 				await eda.sch_PrimitiveText?.create?.(
-					toSchUnit(e.position.x, ctx.units),
-					toSchUnit(e.position.y, ctx.units),
+					U(e.position.x),
+					U(e.position.y),
 					e.content,
-					toSchUnit(e.height, ctx.units) * 0.8,
 					radToDeg(e.rotation),
+					null,
+					null,
+					Math.max(1, U(e.height) * 0.8),
 				);
 				break;
 		}
@@ -118,18 +149,9 @@ async function writeSchOne(e: DwgEntity, ctx: SchCtx, result: ApplyImportResult)
 	}
 }
 
-function collectPolylinePoints(e: DwgEntity): DwgPoint[] {
-	if (e.kind === 'CIRCLE') {
-		const pts: DwgPoint[] = [];
-		const segments = 32;
-		for (let i = 0; i < segments; i++) {
-			const a = (i / segments) * Math.PI * 2;
-			pts.push({ x: e.center.x + Math.cos(a) * e.radius, y: e.center.y + Math.sin(a) * e.radius });
-		}
-		return pts;
-	}
-	if (e.kind === 'LWPOLYLINE' || e.kind === 'POLYLINE' || e.kind === 'SPLINE') {
-		return e.points;
-	}
-	return [];
+function pointOnCircle(center: DwgPoint, radius: number, angleRad: number): DwgPoint {
+	return {
+		x: center.x + Math.cos(angleRad) * radius,
+		y: center.y + Math.sin(angleRad) * radius,
+	};
 }

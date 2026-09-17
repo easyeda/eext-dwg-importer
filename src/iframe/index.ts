@@ -1,15 +1,21 @@
 /**
- * 弹窗入口：初始化状态机、UI 组件、MessageBus；分发文件选择 / 解析 / 导入事件。
+ * 弹窗入口（自包含）。
+ *
+ * 架构：iframe 内直接访问全局 `eda` 对象（官方文档明确支持，无需 window.parent），
+ * 因此解析、图层映射与写图元都在本文件内完成，没有跨帧消息层。
+ *
+ * 启动参数（documentType）由 host 在 openIFrame 前写入 sys_Storage，
+ * 因为 openIFrame 不支持 query 参数。若读不到则回退到自行探测当前文档。
  */
 
 import type { ApplyImportPayload, DwgIR, ImportDocumentType, PcbLayerInfo } from '../shared/types';
 import type { State } from './state-machine';
 import type { IframeStorage } from './storage';
+import { DOC_TYPE, edaApi, LAYER } from '../shared/eda-api';
 import { t } from '../shared/i18n';
 import { DEFAULT_OPTIONS } from '../shared/types';
-import { PCB_LAYER_ID } from './dwg/layer-suggest';
+import { applyFootprintImport, applyPcbImport, applySchImport } from '../write/index';
 import { parseDwg } from './dwg/parser';
-import { onHostMessage, sendToHost } from './messagebus';
 import { createStateMachine } from './state-machine';
 import { createIframeStorage } from './storage';
 import { createFileSection } from './ui/file-section';
@@ -23,6 +29,7 @@ import stylesCss from './ui/styles.css';
 injectStyles(stylesCss);
 
 const storage: IframeStorage = createIframeStorage();
+const IFRAME_ID = 'dwg-importer-window';
 
 const app = document.getElementById('app')!;
 const headerEl = app.querySelector<HTMLElement>('[data-role="header"]')!;
@@ -30,9 +37,9 @@ const mainEl = app.querySelector<HTMLElement>('[data-role="main"]')!;
 const footerEl = app.querySelector<HTMLElement>('[data-role="footer"]')!;
 const importBtn = footerEl.querySelector<HTMLButtonElement>('[data-role="import-btn"]')!;
 const cancelBtn = footerEl.querySelector<HTMLButtonElement>('[data-role="cancel-btn"]')!;
+const contextEl = headerEl.querySelector<HTMLElement>('[data-role="context"]')!;
 
-headerEl.querySelector<HTMLElement>('[data-role="title"]')!.textContent = t('Drop DWG file here or click to select');
-headerEl.querySelector<HTMLElement>('[data-role="context"]')!.textContent = '';
+headerEl.querySelector<HTMLElement>('[data-role="title"]')!.textContent = t('DWG Importer');
 cancelBtn.textContent = t('Cancel');
 importBtn.textContent = t('Import');
 
@@ -46,36 +53,44 @@ const fileSec = createFileSection(mainEl.querySelector<HTMLElement>('[data-role=
 const sm = createStateMachine();
 let currentIr: DwgIR | null = null;
 let currentDocType: ImportDocumentType = 'PCB';
-let pcbLayers: PcbLayerInfo[] = buildPcbLayerList('PCB');
+let targetLayers: PcbLayerInfo[] = buildLayerList('PCB');
 
-// Restore persistent options
-(async () => {
-	const w = await storage.getDefaultLineWidth();
-	const u = await storage.getDefaultUnit();
+// ── 初始化：文档类型 + 持久化选项 ──────────────────────────────
+void init();
+
+async function init(): Promise<void> {
+	currentDocType = storage.getLaunchParams()?.documentType ?? await detectDocumentType() ?? 'PCB';
+	targetLayers = buildLayerList(currentDocType);
+	contextEl.textContent = currentDocType;
+
+	const lastDir = storage.getLastDir();
+	if (lastDir) {
+		edaApi()?.sys_Message?.showToastMessage?.(t('Last directory: {0}', lastDir));
+	}
+
 	optionsSec.setOptions({
 		...DEFAULT_OPTIONS,
-		defaultLineWidthMil: w,
-		units: u,
+		defaultLineWidthMil: storage.getDefaultLineWidth(),
+		units: storage.getDefaultUnit(),
 	});
-	const lastDir = await storage.getLastDir();
-	if (lastDir) {
-		// 沙箱限制下仅 toast 提示，避免误以为支持
+	fileSec.setStatusIdle();
+	updateImportBtn(sm.state);
+}
 
-		console.warn(`[DwgImporter] lastDir=${lastDir}`);
+async function detectDocumentType(): Promise<ImportDocumentType | undefined> {
+	try {
+		const info = await edaApi()?.dmt_SelectControl?.getCurrentDocumentInfo?.();
+		switch (info?.documentType) {
+			case DOC_TYPE.PCB: return 'PCB';
+			case DOC_TYPE.SCHEMATIC_PAGE: return 'SCH';
+			case DOC_TYPE.FOOTPRINT: return 'FOOTPRINT';
+			default: return undefined;
+		}
 	}
-})();
-
-fileSec.setStatusIdle();
-
-onHostMessage((msg) => {
-	if (msg.type === 'init') {
-		currentDocType = msg.documentType;
-		pcbLayers = buildPcbLayerList(msg.documentType);
-		headerEl.querySelector<HTMLElement>('[data-role="context"]')!.textContent = msg.documentType;
+	catch {
+		return undefined;
 	}
-});
-
-sendToHost({ type: 'ready' });
+}
 
 sm.subscribe((s) => {
 	updateImportBtn(s);
@@ -86,14 +101,12 @@ function updateImportBtn(s: State): void {
 	if (s === 'parsed' && currentIr) {
 		importBtn.textContent = t('Import {0} primitives', String(currentIr.entities.length));
 	}
-	else if (s === 'importing') {
-		importBtn.textContent = t('Status: importing {0}/{1}', '…', '…');
-	}
 	else {
 		importBtn.textContent = t('Import');
 	}
 }
 
+// ── 文件选择 → 解析 → 智能建议 ────────────────────────────────
 fileSec.onFileSelected(async (file) => {
 	previewSec.reset();
 	sm.transition('parsing');
@@ -107,10 +120,10 @@ fileSec.onFileSelected(async (file) => {
 		});
 		currentIr = ir;
 
-		// 应用智能建议
+		// 先按名字建议，未命中再退回颜色建议。
 		const colorMap = suggestAllByColor(
 			ir.layers.map(l => ({ name: l.name, color: l.color })),
-			pcbLayers,
+			targetLayers,
 		);
 		const nameMap = suggestAllByName(ir.layers.map(l => ({ name: l.name })));
 		const merged: Record<string, number | null> = {};
@@ -118,7 +131,7 @@ fileSec.onFileSelected(async (file) => {
 			merged[l.name] = nameMap[l.name] ?? colorMap[l.name] ?? null;
 		}
 
-		layerMap.setLayers(ir.layers, pcbLayers);
+		layerMap.setLayers(ir.layers, targetLayers);
 		layerMap.setMapping(merged);
 		previewSec.setIr(ir);
 		fileSec.setStatusParsed(ir.entities.length, ir.layers.length);
@@ -130,74 +143,87 @@ fileSec.onFileSelected(async (file) => {
 	}
 });
 
+// ── 导入：直接在 iframe 内写图元 ──────────────────────────────
 importBtn.addEventListener('click', () => {
 	if (!currentIr)
 		return;
-	sm.transition('importing');
+
+	const options = optionsSec.getOptions();
 	const payload: ApplyImportPayload = {
 		ir: currentIr,
 		mapping: layerMap.getMapping(),
-		options: optionsSec.getOptions(),
+		options,
 		documentType: currentDocType,
 	};
-	void storage.setLastDir('');
-	void storage.setDefaultLineWidth(payload.options.defaultLineWidthMil);
-	void storage.setDefaultUnit(payload.options.units);
-	sendToHost({ type: 'apply-import', payload });
+
+	sm.transition('importing');
+	void storage.setDefaultLineWidth(options.defaultLineWidthMil);
+	void storage.setDefaultUnit(options.units);
+
+	void runImport(payload);
 });
+
+async function runImport(payload: ApplyImportPayload): Promise<void> {
+	const onProgress = (done: number, total: number): void => {
+		fileSec.setStatusParsing(total > 0 ? Math.round((done / total) * 100) : 100);
+	};
+
+	try {
+		const result = payload.documentType === 'SCH'
+			? await applySchImport(payload, onProgress)
+			: payload.documentType === 'FOOTPRINT'
+				? await applyFootprintImport(payload, onProgress)
+				: await applyPcbImport(payload, onProgress);
+
+		sm.transition('done');
+		const msg = result.failedCount > 0
+			? t('Status: import done, {0} primitives created, {1} failed', String(result.successCount), String(result.failedCount))
+			: t('Status: import done, {0} primitives created, {1} failed', String(result.successCount), '0');
+		edaApi()?.sys_Message?.showToastMessage?.(msg);
+
+		if (result.errors.length > 0) {
+			edaApi()?.sys_Log?.warn?.('[DwgImporter] first error:', result.errors[0]?.message);
+		}
+
+		// 关闭弹窗，回到画布查看结果。
+		setTimeout(() => {
+			void edaApi()?.sys_IFrame?.closeIFrame?.(IFRAME_ID);
+		}, 600);
+	}
+	catch (err) {
+		sm.transition('error');
+		const message = t('Import failed: {0}', (err as Error).message);
+		fileSec.setStatusError(message);
+		edaApi()?.sys_Message?.showToastMessage?.(message);
+	}
+}
 
 cancelBtn.addEventListener('click', () => {
-	sendToHost({ type: 'cancel' });
-	sm.transition('idle');
+	void edaApi()?.sys_IFrame?.closeIFrame?.(IFRAME_ID);
 });
 
-onHostMessage((msg) => {
-	if (msg.type === 'apply-result') {
-		sm.transition('done');
-
-		console.warn(`[DwgImporter] import done: success=${msg.result.successCount} failed=${msg.result.failedCount}`);
-		setTimeout(() => {
-			sendToHost({ type: 'cancel' });
-		}, 100);
-	}
-});
-
-/** 静态 PCB 层清单（与 pro-api-types EPCB_LayerId 对齐）。 */
-function buildPcbLayerList(docType: ImportDocumentType): PcbLayerInfo[] {
+// ── 目标层清单（id 对照 EPCB_LayerId 核实） ────────────────────
+function buildLayerList(docType: ImportDocumentType): PcbLayerInfo[] {
 	if (docType === 'SCH') {
-		return [{ id: PCB_LAYER_ID.Document, name: 'Document' }];
+		return [{ id: LAYER.DOCUMENT, name: 'Document' }];
 	}
 	if (docType === 'FOOTPRINT') {
 		return [
-			{ id: PCB_LAYER_ID.Document, name: 'Document' },
-			{ id: PCB_LAYER_ID.Mechanical1, name: 'Mechanical1' },
-			{ id: PCB_LAYER_ID.Mechanical2, name: 'Mechanical2' },
-			{ id: PCB_LAYER_ID.Mechanical3, name: 'Mechanical3' },
-			{ id: PCB_LAYER_ID.Mechanical4, name: 'Mechanical4' },
-			{ id: PCB_LAYER_ID.Mechanical5, name: 'Mechanical5' },
-			{ id: PCB_LAYER_ID.Mechanical6, name: 'Mechanical6' },
-			{ id: PCB_LAYER_ID.Mechanical7, name: 'Mechanical7' },
-			{ id: PCB_LAYER_ID.Mechanical8, name: 'Mechanical8' },
-			{ id: PCB_LAYER_ID.Mechanical9, name: 'Mechanical9' },
-			{ id: PCB_LAYER_ID.Mechanical10, name: 'Mechanical10' },
+			{ id: LAYER.TOP_SILKSCREEN, name: 'TopSilkscreen' },
+			{ id: LAYER.MECHANICAL, name: 'Mechanical' },
+			{ id: LAYER.DOCUMENT, name: 'Document' },
+			{ id: LAYER.BOARD_OUTLINE, name: 'BoardOutline' },
 		];
 	}
 	return [
-		{ id: PCB_LAYER_ID.BoardOutline, name: 'BoardOutline' },
-		{ id: PCB_LAYER_ID.TopLayer, name: 'TopLayer' },
-		{ id: PCB_LAYER_ID.BottomLayer, name: 'BottomLayer' },
-		{ id: PCB_LAYER_ID.TopSilkLayer, name: 'TopSilkLayer' },
-		{ id: PCB_LAYER_ID.BottomSilkLayer, name: 'BottomSilkLayer' },
-		{ id: PCB_LAYER_ID.Document, name: 'Document' },
-		{ id: PCB_LAYER_ID.Mechanical1, name: 'Mechanical1' },
-		{ id: PCB_LAYER_ID.Mechanical2, name: 'Mechanical2' },
-		{ id: PCB_LAYER_ID.Mechanical3, name: 'Mechanical3' },
-		{ id: PCB_LAYER_ID.Mechanical4, name: 'Mechanical4' },
-		{ id: PCB_LAYER_ID.Mechanical5, name: 'Mechanical5' },
-		{ id: PCB_LAYER_ID.Mechanical6, name: 'Mechanical6' },
-		{ id: PCB_LAYER_ID.Mechanical7, name: 'Mechanical7' },
-		{ id: PCB_LAYER_ID.Mechanical8, name: 'Mechanical8' },
-		{ id: PCB_LAYER_ID.Mechanical9, name: 'Mechanical9' },
-		{ id: PCB_LAYER_ID.Mechanical10, name: 'Mechanical10' },
+		{ id: LAYER.BOARD_OUTLINE, name: 'BoardOutline' },
+		{ id: LAYER.TOP, name: 'TopLayer' },
+		{ id: LAYER.BOTTOM, name: 'BottomLayer' },
+		{ id: LAYER.TOP_SILKSCREEN, name: 'TopSilkscreen' },
+		{ id: LAYER.BOTTOM_SILKSCREEN, name: 'BottomSilkscreen' },
+		{ id: LAYER.TOP_ASSEMBLY, name: 'TopAssembly' },
+		{ id: LAYER.BOTTOM_ASSEMBLY, name: 'BottomAssembly' },
+		{ id: LAYER.MECHANICAL, name: 'Mechanical' },
+		{ id: LAYER.DOCUMENT, name: 'Document' },
 	];
 }

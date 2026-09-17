@@ -4,7 +4,7 @@
 	"displayName": "导入DWG",
 	"description": "在 PCB / 原理图 / 封装编辑器中直接导入 DWG 文件，支持 BLOCK 展开与图层映射",
 	"version": "1.0.0",
-	"publisher": "",
+	"publisher": "EasyEDA",
 	"engines": {
 		"eda": "^3.2.0"
 	},
