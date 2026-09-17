@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-Hans">
+	<head>
+		<title>Import DWG</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<script type="module" src="./index.js"></script>
+	</head>
+	<body>
+		<div id="app" class="app">
+			<header data-role="header" class="app-header">
+				<div data-role="title" class="app-title">DWG Importer</div>
+				<div data-role="context" class="app-context"></div>
+			</header>
+
+			<main data-role="main" class="app-main">
+				<section data-role="file-section" class="card">
+					<div data-role="dropzone" class="dropzone"></div>
+					<input data-role="file-input" type="file" accept=".dwg" hidden />
+					<div class="file-meta">
+						<span data-role="file-name"></span>
+						<span data-role="status"></span>
+					</div>
+					<button data-role="select-btn" class="btn"></button>
+				</section>
+
+				<section data-role="layer-mapping-section" class="card">
+					<div data-role="toolbar" class="toolbar">
+						<button data-role="select-all" class="btn"></button>
+						<button data-role="deselect-all" class="btn"></button>
+						<button data-role="by-color" class="btn"></button>
+						<button data-role="by-name" class="btn"></button>
+						<button data-role="reset" class="btn"></button>
+					</div>
+					<table class="mapping-table">
+						<thead>
+							<tr>
+								<th></th>
+								<th data-role="col-dwg">DWG</th>
+								<th>✓</th>
+								<th data-role="col-pcb"></th>
+							</tr>
+						</thead>
+						<tbody data-role="rows"></tbody>
+					</table>
+				</section>
+
+				<section data-role="options-section" class="card">
+					<div data-role="title" class="card-title"></div>
+					<div data-role="kind-label" style="margin-bottom: 4px; color: var(--text-secondary); font-size: 12px;"></div>
+					<div data-role="kind-grid" class="kind-grid"></div>
+					<div class="options-row">
+						<span data-role="width-label"></span>
+						<select data-role="width-select"></select>
+					</div>
+					<div class="options-row">
+						<span data-role="unit-label"></span>
+						<select data-role="unit-select"></select>
+					</div>
+					<div class="options-row">
+						<label>
+							<input data-role="skip-empty" type="checkbox" />
+							<span data-role="skip-empty-label"></span>
+						</label>
+					</div>
+					<div class="options-row">
+						<label style="opacity: 0.5">
+							<input type="checkbox" disabled />
+							<span data-role="merge-collinear-label"></span>
+						</label>
+					</div>
+				</section>
+
+				<section data-role="preview-section" class="card">
+					<div data-role="title" class="card-title"></div>
+					<div class="preview-line">
+						<span data-role="bbox-label" class="preview-label"></span>
+						<span data-role="bbox" class="preview-value">—</span>
+					</div>
+					<div class="preview-line">
+						<span data-role="counts-label" class="preview-label"></span>
+						<span data-role="counts" class="preview-value"></span>
+					</div>
+					<div class="preview-line">
+						<span data-role="blocks-label" class="preview-label"></span>
+						<span data-role="blocks" class="preview-value"></span>
+					</div>
+					<div>
+						<span data-role="warnings-label" class="preview-label"></span>
+						<ul data-role="warnings"></ul>
+					</div>
+				</section>
+			</main>
+
+			<footer class="app-footer">
+				<button data-role="cancel-btn" class="btn"></button>
+				<button data-role="import-btn" class="btn btn-primary" disabled></button>
+			</footer>
+		</div>
+	</body>
+</html>

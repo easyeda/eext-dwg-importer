@@ -1,21 +1,23 @@
 {
 	"name": "dwg-importer",
-	"uuid": "",
-	"displayName": "直接导入DWG格式到PCB",
-	"description": "",
+	"uuid": "5d5d79bf5dd44287817ae29f79a2e9e4",
+	"displayName": "导入DWG",
+	"description": "在 PCB / 原理图 / 封装编辑器中直接导入 DWG 文件，支持 BLOCK 展开与图层映射",
 	"version": "1.0.0",
 	"publisher": "",
 	"engines": {
 		"eda": "^3.2.0"
 	},
-	"license": "Apache-2.0",
+	"license": "GPL-3.0-or-later",
 	"repository": {
 		"type": "extension-store",
 		"url": ""
 	},
 	"categories": "Other",
 	"keywords": [
-		"DWG"
+		"DWG",
+		"CAD",
+		"mechanical"
 	],
 	"images": {
 		"logo": "./images/logo.png"
@@ -28,13 +30,39 @@
 	"headerMenus": {
 		"pcb": [
 			{
-				"id": "menuId3",
-				"title": "Ext Menu",
+				"id": "dwg-importer.pcb",
+				"title": "DWG Importer",
 				"menuItems": [
 					{
-						"id": "About",
-						"title": "About...",
-						"registerFn": "about"
+						"id": "dwg-importer.pcb.import",
+						"title": "导入 DWG…",
+						"registerFn": "importDwgPcb"
+					}
+				]
+			}
+		],
+		"schematic": [
+			{
+				"id": "dwg-importer.schematic",
+				"title": "DWG Importer",
+				"menuItems": [
+					{
+						"id": "dwg-importer.schematic.import",
+						"title": "导入 DWG…",
+						"registerFn": "importDwgSch"
+					}
+				]
+			}
+		],
+		"footprint": [
+			{
+				"id": "dwg-importer.footprint",
+				"title": "DWG Importer",
+				"menuItems": [
+					{
+						"id": "dwg-importer.footprint.import",
+						"title": "导入 DWG…",
+						"registerFn": "importDwgFootprint"
 					}
 				]
 			}

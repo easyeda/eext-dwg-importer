@@ -16,3 +16,8 @@
 /tsconfig.json
 .eslintcache
 debug.log
+/docs/
+/.dsh/
+/scripts/
+/.sdk-manifest.json
+/.npm-cache/
