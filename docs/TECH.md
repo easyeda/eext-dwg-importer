@@ -121,8 +121,8 @@
 | `src/iframe/index.ts` | 弹窗启动；初始化状态机；**直接在 iframe 内完成导入** |
 | `src/iframe/ui/file-section.ts` | 文件选择/拖拽/解析进度/已选文件信息 |
 | `src/iframe/ui/layer-mapping.ts` | 图层列表 + 映射下拉 + 智能建议工具栏 |
-| `src/iframe/ui/options-section.ts` | 实体类型开关 + 线宽 + 单位 + 跳过空图层 |
-| `src/iframe/ui/preview-section.ts` | 实体计数 + 包围盒 + BLOCK 摘要 + warnings |
+| `src/iframe/ui/options-section.ts` | 实体类型开关 + 线宽 + 单位 + 跳过空图层 + 原点偏移（手输/画布拾取） |
+| ~~`src/iframe/ui/preview-section.ts`~~ | **已移除（v1.2.0）**：预览区取消，解析警告改为 toast + `sys_Log`；见 `src/iframe/canvas-pick.ts`（画布拾取原点） |
 | `src/iframe/ui/inject-styles.ts` | 运行时注入 CSS（esbuild 以 text 载入） |
 | `src/iframe/ui/styles.css` | 弹窗样式，CSS 变量驱动的浅/深色主题 |
 | `src/iframe/dwg/parser.ts` | wasm 加载与生命周期；调用 libredwg 解析入口；进度上报 |
@@ -135,7 +135,7 @@
 | `src/write/pcb-writer.ts` | IR + mapping + options → PCB Primitive API（PCB / Footprint 共用） |
 | `src/write/sch-writer.ts` | IR + mapping + options → SCH Primitive API |
 | `src/shared/eda-api.ts` | **所有 `eda.*` 的类型契约与层 id 常量**（对照 pro-api-types 核实） |
-| `src/shared/units.ts` | mm/inch ↔ mil；DWG 单位 → mil |
+| `src/shared/units.ts` | mm/cm/m/inch/ft/mil ↔ mil；DWG 单位 → mil（INSUNITS 检测在 ir.ts） |
 | `src/shared/types.ts` | 共享类型（IR、mapping、options） |
 | `src/shared/i18n.ts` | 文案 key → 当前语言 |
 
@@ -151,7 +151,10 @@ export type DwgEntityKind =
   | 'LINE' | 'LWPOLYLINE' | 'POLYLINE' | 'CIRCLE' | 'ARC'
   | 'TEXT' | 'MTEXT' | 'SPLINE';
 
-export type DwgUnit = 'mm' | 'inch' | 'unknown';
+export type DwgUnit = 'mm' | 'cm' | 'm' | 'inch' | 'ft' | 'mil' | 'unknown';
+// 'unknown' = INSUNITS=0/缺失/无法识别，按 mm 解释（dwgToMil 内部处理）
+// v1.2.0 修复：detectUnits 此前把 INSUNITS=4/5/6（mm/cm/m）误判为 inch，
+// 导致 mm 图纸导入放大 25.4 倍。
 
 export interface DwgPoint { x: number; y: number; }
 
@@ -1039,7 +1042,7 @@ export function createStateMachine(initial: Record<State, unknown>) {
 | §3.2 F1 菜单 | §12.1 / §12.2 + `extension.json` |
 | §3.4 F3 解析 | §4 + §12.4 + §5.2 |
 | §3.5–§3.7 图层 / 选项 | §4.3 + §12.4 |
-| §3.8 预览 | §12.4 preview-section |
+| §3.8 预览 | **已移除（v1.2.0）**；解析警告 → toast + `sys_Log`（`iframe/index.ts` reportParseWarnings） |
 | §3.9 批量创建 + 错误 | §6.2 |
 | §3.10 缩放 | 由 host 调用 `pcb_Document.zoomToAllPrimitives()`，非 writer 职责 |
 | §3.12 F11 失败 | §6.2 result.errors |

@@ -8,13 +8,19 @@ import { need } from './dom';
 export interface FileSection {
 	setStatusIdle: () => void;
 	setStatusParsing: (percent: number) => void;
-	setStatusParsed: (entityCount: number, layerCount: number) => void;
+	/** @param unitLabel 已解析出的图纸单位（显示出来便于核对换算是否正确）。 */
+	setStatusParsed: (entityCount: number, layerCount: number, unitLabel: string) => void;
 	setStatusError: (message: string) => void;
 	onFileSelected: (cb: (file: File) => void) => void;
 	destroy: () => void;
 }
 
-export function createFileSection(root: HTMLElement, onSelect: () => void): FileSection {
+/**
+ * @param root 挂载节点（file-section 容器）。
+ * @param onSelect 选中新文件时先于 onFileSelected 回调触发（可选）。
+ *   原用于重置预览区；预览区移除后目前无调用方传参，保留是为了语义完整。
+ */
+export function createFileSection(root: HTMLElement, onSelect?: () => void): FileSection {
 	const drop = need(root, 'dropzone') as HTMLDivElement;
 	const fileInput = need(root, 'file-input') as HTMLInputElement;
 	const nameLabel = need(root, 'file-name') as HTMLSpanElement;
@@ -51,7 +57,7 @@ export function createFileSection(root: HTMLElement, onSelect: () => void): File
 		const name = file.name;
 		const sizeKb = (file.size / 1024).toFixed(1);
 		nameLabel.textContent = `${name} · ${sizeKb} KB`;
-		onSelect();
+		onSelect?.();
 		for (const h of handlers) h(file);
 	}
 
@@ -62,8 +68,13 @@ export function createFileSection(root: HTMLElement, onSelect: () => void): File
 		setStatusParsing(percent: number) {
 			statusLabel.textContent = t('Status: parsing {0}%', String(percent));
 		},
-		setStatusParsed(entityCount: number, layerCount: number) {
-			statusLabel.textContent = t('Status: parsed, {0} primitives, {1} layers', String(entityCount), String(layerCount));
+		setStatusParsed(entityCount: number, layerCount: number, unitLabel: string) {
+			statusLabel.textContent = t(
+				'Status: parsed, {0} primitives, {1} layers, unit {2}',
+				String(entityCount),
+				String(layerCount),
+				unitLabel,
+			);
 		},
 		setStatusError(message: string) {
 			statusLabel.textContent = t('Status: parse failed: {0}', message);

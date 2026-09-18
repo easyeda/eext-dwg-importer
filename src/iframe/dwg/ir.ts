@@ -150,13 +150,39 @@ export function computeBoundingBox(entities: ReadonlyArray<DwgEntity>): { minX: 
 	return { minX, minY, maxX, maxY };
 }
 
-/** 检测 DWG header 中的 INSUNITS，返回单位。 */
-export function detectUnits(insunits: number | undefined): DwgUnit {
-	if (insunits === 1 || insunits === 2 || insunits === 4 || insunits === 5 || insunits === 6)
-		return 'inch';
-	if (insunits === 0)
-		return 'unknown';
-	return 'mm';
+/**
+ * 检测 DWG header 中的 INSUNITS，返回单位；无法判定时写入解析警告。
+ *
+ * 枚举对照 libredwg-web `DwgHeader.INSUNITS` 的文档（AutoCAD 标准）：
+ * 0 无单位 / 1 英寸 / 2 英尺 / 3 英里 / 4 毫米 / 5 厘米 / 6 米 / 9 mil / 10 码…
+ *
+ * v1.2.0 修复：此前 4/5/6（mm/cm/m）被误判为 inch，mm 图纸按 ×1000
+ * 而非 ×39.37 换算，导入图元放大 25.4 倍。
+ */
+export function detectUnits(insunits: number | undefined, warnings?: string[]): DwgUnit {
+	switch (insunits) {
+		case 1:
+			return 'inch';
+		case 2:
+			return 'ft';
+		case 4:
+			return 'mm';
+		case 5:
+			return 'cm';
+		case 6:
+			return 'm';
+		case 9:
+			return 'mil';
+		case 0:
+			// 明确声明「无单位」：按 mm 解释，但必须让用户知道这是假设。
+			warnings?.push('图纸未声明单位（INSUNITS=0），将按 mm 解释');
+			return 'unknown';
+		default:
+			warnings?.push(typeof insunits === 'number'
+				? `无法识别的图纸单位代码（INSUNITS=${insunits}），将按 mm 解释`
+				: 'DWG 头部未声明单位（缺少 INSUNITS），将按 mm 解释');
+			return 'unknown';
+	}
 }
 
 /** 从 libredwg 输出组装 IR。 */

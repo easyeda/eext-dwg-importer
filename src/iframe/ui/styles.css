@@ -318,61 +318,68 @@ body {
 	font-size: 12px;
 }
 
-.preview-line {
-	display: flex;
-	gap: 8px;
-	align-items: baseline;
-	margin-bottom: 6px;
+/* ── 原点偏移行 ─────────────────────────────────────────── */
+
+.offset-row {
+	gap: 6px;
+	align-items: center;
+	flex-wrap: nowrap;
 }
 
-/* 警告行：标签在上、列表在下，列表可滚动以适配固定高度 */
-.preview-line-top {
-	flex-direction: column;
-	align-items: stretch;
-	flex: 1 1 auto;
-	min-height: 0;
-	margin-bottom: 0;
-}
-
-.preview-label {
+.offset-comma {
 	color: var(--text-secondary);
-	font-size: 12px;
-	flex: 0 0 auto;
-	min-width: 110px;
+	user-select: none;
 }
 
-.preview-value {
-	font-size: 12px;
-	min-width: 0;
-	word-break: break-word;
-}
-
-.count-chip,
-.block-chip {
-	display: inline-block;
-	margin: 0 6px 4px 0;
-	padding: 2px 8px;
-	border-radius: 10px;
-	background: var(--bg-secondary);
-	color: var(--text-secondary);
-	font-size: 11px;
-}
-
-.muted {
+.offset-unit {
 	color: var(--text-muted);
+	font-size: 11px;
+	flex: 0 0 auto;
 }
 
-.preview-warnings {
-	margin: 4px 0 0 18px;
-	padding: 0;
-	color: var(--warn);
-	overflow-y: auto;
-	flex: 1 1 auto;
-	min-height: 0;
-}
-
-.preview-warnings li {
+.num-input {
+	width: 72px;
+	flex: 0 1 auto;
+	min-width: 0;
+	padding: 3px 6px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg-primary);
+	color: var(--text-primary);
 	font-size: 12px;
+	font-family: var(--font);
+}
+
+.num-input:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+
+/* 拾取按钮：内联 SVG 图标（鼠标箭头），由 options-section 注入 */
+.icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 28px;
+	height: 25px;
+	padding: 0;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg-primary);
+	color: var(--text-secondary);
+	cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+	border-color: var(--accent);
+	color: var(--accent);
+	background: var(--bg-secondary);
+}
+
+.icon-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
 }
 
 ::-webkit-scrollbar {

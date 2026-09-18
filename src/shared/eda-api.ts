@@ -41,6 +41,17 @@ export interface PcbComplexPolygonLike {
 	readonly __pcbComplexPolygon: unique symbol;
 }
 
+/** create() 返回的图元对象最小契约（本扩展只读图元 ID）。 */
+export interface PrimitiveLike {
+	getState_PrimitiveId?: () => string;
+}
+
+/** 鼠标事件回调命中的图元信息（仅取用到的字段）。 */
+export interface MouseHitPrimitive {
+	primitiveId: string;
+	primitiveType?: unknown;
+}
+
 /** 打开内联框架的额外参数（对照 SYS_IFrame.openIFrame 的 props 核实：无 x/y）。 */
 export interface OpenIFrameProps {
 	maximizeButton?: boolean;
@@ -107,9 +118,58 @@ export interface EdaGlobals {
 	};
 	sys_Message?: {
 		showToastMessage?: (message: string, messageType?: string, timer?: number) => void;
+		/** 展示跟随鼠标的提示；不传 msTimeout 则持续展示，直到 removeFollowMouseTip。 */
+		showFollowMouseTip?: (tip: string, msTimeout?: number) => Promise<void>;
+		/** 移除跟随鼠标的提示。 */
+		removeFollowMouseTip?: (tip?: string) => Promise<void>;
 	};
 	dmt_SelectControl?: {
 		getCurrentDocumentInfo?: () => Promise<{ documentType: number; uuid: string; tabId: string } | undefined>;
+	};
+	dmt_EditorControl?: {
+		/**
+		 * 缩放到指定（默认当前焦点）文档的全部图元，返回可视范围边界；false 表示失败。
+		 * 签名对照 DMT_EditorControl.zoomToAllPrimitives 核实。
+		 * 导入完成后调用，把视野带到新写入的图元处——
+		 * DWG 原始坐标换算成 mil 后往往离当前视野很远，不缩放会表现为「画布上什么都没有」。
+		 */
+		zoomToAllPrimitives?: (tabId?: string) => Promise<{ left: number; right: number; top: number; bottom: number } | false>;
+	};
+	pcb_SelectControl?: {
+		/** 当前鼠标在画布上的位置（画布数据层坐标）；不在画布上时为 undefined。 */
+		getCurrentMousePosition?: () => Promise<{ x: number; y: number } | undefined>;
+		/** 用图元 ID 选中图元。 */
+		doSelectPrimitives?: (primitiveIds: Array<string>) => Promise<boolean>;
+	};
+	sch_SelectControl?: {
+		getCurrentMousePosition?: () => Promise<{ x: number; y: number } | undefined>;
+		doSelectPrimitives?: (primitiveIds: Array<string>) => Promise<boolean>;
+	};
+	pcb_Event?: {
+		/**
+		 * 鼠标事件监听。对照 EPCB_MouseEventType：事件只有
+		 * 'selected' | 'clearSelected' | 'move'（EDA 没有 click 事件），
+		 * 'all' 接收全部；注意 move 在鼠标移动时高频触发。
+		 */
+		addMouseEventListener?: (
+			id: string,
+			eventType: 'all' | 'selected' | 'clearSelected' | 'move',
+			callFn: (eventType: string, props?: Array<MouseHitPrimitive>) => void | Promise<void>,
+			onlyOnce?: boolean,
+		) => void;
+		removeEventListener?: (id: string) => boolean;
+		isEventListenerAlreadyExist?: (id: string) => boolean;
+	};
+	sch_Event?: {
+		/** 对照 ESCH_MouseEventType：只有 'selected' | 'clearSelected'（无 move/click）。 */
+		addMouseEventListener?: (
+			id: string,
+			eventType: 'all' | 'selected' | 'clearSelected',
+			callFn: (eventType: string) => void | Promise<void>,
+			onlyOnce?: boolean,
+		) => void;
+		removeEventListener?: (id: string) => boolean;
+		isEventListenerAlreadyExist?: (id: string) => boolean;
 	};
 	pcb_MathPolygon?: {
 		createPolygon?: (polygon: PcbPolygonSource) => PcbPolygonLike | undefined;
@@ -128,6 +188,8 @@ export interface EdaGlobals {
 			lineWidth?: number,
 			primitiveLock?: boolean,
 		) => Promise<unknown>;
+		getAllPrimitiveId?: () => Promise<Array<string>>;
+		delete?: (primitiveIds: string | Array<string>) => Promise<boolean>;
 	};
 	pcb_PrimitivePolyline?: {
 		create?: (
@@ -137,6 +199,7 @@ export interface EdaGlobals {
 			lineWidth?: number,
 			primitiveLock?: boolean,
 		) => Promise<unknown>;
+		getAllPrimitiveId?: () => Promise<Array<string>>;
 	};
 	pcb_PrimitiveRegion?: {
 		create?: (
@@ -161,6 +224,7 @@ export interface EdaGlobals {
 			interactiveMode?: number,
 			primitiveLock?: boolean,
 		) => Promise<unknown>;
+		getAllPrimitiveId?: () => Promise<Array<string>>;
 	};
 	pcb_PrimitiveString?: {
 		create?: (
@@ -190,6 +254,20 @@ export interface EdaGlobals {
 			lineWidth?: number | null,
 			lineType?: number | null,
 		) => Promise<unknown>;
+		getAllPrimitiveId?: () => Promise<Array<string>>;
+	};
+	sch_PrimitiveRectangle?: {
+		/** 对照 SCH_PrimitiveRectangle.create：topLeftX, topLeftY, width, height, ... */
+		create?: (
+			topLeftX: number,
+			topLeftY: number,
+			width: number,
+			height: number,
+			cornerRadius?: number,
+			rotation?: number,
+		) => Promise<unknown>;
+		getAllPrimitiveId?: () => Promise<Array<string>>;
+		delete?: (primitiveIds: string | Array<string>) => Promise<boolean>;
 	};
 	sch_PrimitivePolygon?: {
 		create?: (

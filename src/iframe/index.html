@@ -38,7 +38,7 @@
 			<!--
 				左右两栏布局：
 				  左栏 = 文件选择 + 图层映射（图层较多，仅此区域内部滚动）
-				  右栏 = 选项 + 预览（固定宽度，内容量稳定）
+				  右栏 = 选项（固定宽度，内容量稳定）
 				底部 footer 由 .app 的纵向 flex 固定在底部，不随内容滚动。
 				整体不出现页面级滚动条（body overflow: hidden）。
 			-->
@@ -78,7 +78,7 @@
 				</div>
 
 				<div class="col col-right">
-					<section data-role="options-section" class="card">
+					<section data-role="options-section" class="card card-grow">
 						<div data-role="title" class="card-title"></div>
 						<div data-role="kind-label" class="sub-label"></div>
 						<div data-role="kind-grid" class="kind-grid"></div>
@@ -89,6 +89,14 @@
 						<div class="options-row">
 							<span data-role="unit-label"></span>
 							<select data-role="unit-select"></select>
+						</div>
+						<div data-role="offset-label" class="sub-label"></div>
+						<div class="options-row offset-row">
+							<input data-role="offset-x" class="num-input" type="number" step="any" />
+							<span class="offset-comma">,&#8202;</span>
+							<input data-role="offset-y" class="num-input" type="number" step="any" />
+							<button data-role="pick-origin" class="icon-btn" type="button"></button>
+							<span class="offset-unit">mil</span>
 						</div>
 						<div class="options-row">
 							<label>
@@ -101,26 +109,6 @@
 								<input type="checkbox" disabled />
 								<span data-role="merge-collinear-label"></span>
 							</label>
-						</div>
-					</section>
-
-					<section data-role="preview-section" class="card card-grow">
-						<div data-role="title" class="card-title"></div>
-						<div class="preview-line">
-							<span data-role="bbox-label" class="preview-label"></span>
-							<span data-role="bbox" class="preview-value">—</span>
-						</div>
-						<div class="preview-line">
-							<span data-role="counts-label" class="preview-label"></span>
-							<span data-role="counts" class="preview-value"></span>
-						</div>
-						<div class="preview-line">
-							<span data-role="blocks-label" class="preview-label"></span>
-							<span data-role="blocks" class="preview-value"></span>
-						</div>
-						<div class="preview-line preview-line-top">
-							<span data-role="warnings-label" class="preview-label"></span>
-							<ul data-role="warnings" class="preview-warnings"></ul>
 						</div>
 					</section>
 				</div>

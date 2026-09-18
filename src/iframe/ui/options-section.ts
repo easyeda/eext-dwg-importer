@@ -1,8 +1,8 @@
 /**
- * 选项 section：实体类型开关、默认线宽、单位、跳过空图层。
+ * 选项 section：实体类型开关、默认线宽、单位、原点偏移、跳过空图层。
  */
 
-import type { DwgEntityKind, DwgUnit, ImportOptions } from '../../shared/types';
+import type { DwgEntityKind, DwgUnit, ImportOptions, OriginOffset } from '../../shared/types';
 import { t } from '../../shared/i18n';
 import { ALL_ENTITY_KINDS } from '../../shared/types';
 import { need } from './dom';
@@ -20,9 +20,16 @@ const KIND_LABEL_KEY: Record<DwgEntityKind, string> = {
 	SPLINE: 'SPLINE',
 };
 
+/** 画布拾取回调：返回拾取到的坐标（mil）；取消/失败返回 null。 */
+export type PickOriginHandler = () => Promise<OriginOffset | null>;
+
 export interface OptionsSection {
 	getOptions: () => ImportOptions;
 	setOptions: (o: ImportOptions) => void;
+	/** 注册「画布拾取原点」处理器（index.ts 提供，涉及 hideIFrame 等全局编排）。 */
+	onPickOrigin: (handler: PickOriginHandler) => void;
+	/** 用拾取结果回填偏移输入框（mil）。 */
+	setOriginOffset: (o: OriginOffset) => void;
 }
 
 export function createOptionsSection(root: HTMLElement): OptionsSection {
@@ -30,6 +37,9 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 	const widthSelect = need<HTMLSelectElement>(root, 'width-select');
 	const unitSelect = need<HTMLSelectElement>(root, 'unit-select');
 	const skipEmpty = need<HTMLInputElement>(root, 'skip-empty');
+	const offsetX = need<HTMLInputElement>(root, 'offset-x');
+	const offsetY = need<HTMLInputElement>(root, 'offset-y');
+	const pickBtn = need<HTMLButtonElement>(root, 'pick-origin');
 
 	need(root, 'title').textContent = t('Options');
 	need(root, 'kind-label').textContent = t('Entity types');
@@ -37,6 +47,16 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 	need(root, 'unit-label').textContent = t('Units');
 	need(root, 'skip-empty-label').textContent = t('Skip empty layers');
 	need(root, 'merge-collinear-label').textContent = t('Merge collinear segments (coming soon)');
+
+	const offsetLabel = need(root, 'offset-label');
+	offsetLabel.textContent = t('Origin offset (mil)');
+	// 悬停说明：语义 + 拾取按钮用法。
+	offsetLabel.title = t('Origin offset: the DWG (0,0) is placed at this canvas position. 0,0 keeps both origins coincident.');
+	pickBtn.title = t('Pick the origin position on the canvas');
+	// 鼠标箭头图标（内联 SVG，随主题色 currentColor）。
+	pickBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+		+ 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+		+ '<path d="m4 4 7.07 17 2.51-7.39L21 11.07z" /></svg>';
 
 	for (const w of PRESET_WIDTHS) {
 		const opt = document.createElement('option');
@@ -47,7 +67,10 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 	unitSelect.innerHTML = `
 		<option value="auto">${escapeHtml(t('Auto (from DWG)'))}</option>
 		<option value="mm">mm</option>
+		<option value="cm">cm</option>
+		<option value="m">m</option>
 		<option value="inch">inch</option>
+		<option value="mil">mil (1:1)</option>
 	`;
 
 	function rebuildKindGrid(enabled: Set<DwgEntityKind>): void {
@@ -78,12 +101,35 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 		defaultLineWidthMil: 4,
 		units: 'auto',
 		skipEmptyLayers: true,
+		originOffsetMil: { x: 0, y: 0 },
 	};
 
 	rebuildKindGrid(state.enabledKinds);
 	widthSelect.value = String(state.defaultLineWidthMil);
 	unitSelect.value = state.units;
 	skipEmpty.checked = state.skipEmptyLayers;
+
+	function readOffsetInputs(): OriginOffset {
+		const x = Number.parseFloat(offsetX.value);
+		const y = Number.parseFloat(offsetY.value);
+		return {
+			x: Number.isFinite(x) ? x : 0,
+			y: Number.isFinite(y) ? y : 0,
+		};
+	}
+
+	function writeOffsetInputs(o: OriginOffset): void {
+		offsetX.value = String(o.x);
+		offsetY.value = String(o.y);
+	}
+
+	writeOffsetInputs(state.originOffsetMil);
+	offsetX.addEventListener('change', () => {
+		state.originOffsetMil = readOffsetInputs();
+	});
+	offsetY.addEventListener('change', () => {
+		state.originOffsetMil = readOffsetInputs();
+	});
 
 	widthSelect.addEventListener('change', () => {
 		state.defaultLineWidthMil = Number.parseInt(widthSelect.value, 10);
@@ -95,6 +141,21 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 		state.skipEmptyLayers = skipEmpty.checked;
 	});
 
+	let pickHandler: PickOriginHandler | null = null;
+	pickBtn.addEventListener('click', () => {
+		if (!pickHandler || pickBtn.disabled)
+			return;
+		pickBtn.disabled = true;
+		void (async () => {
+			try {
+				await pickHandler();
+			}
+			finally {
+				pickBtn.disabled = false;
+			}
+		})();
+	});
+
 	return {
 		getOptions() {
 			const enabled = new Set<DwgEntityKind>();
@@ -103,17 +164,28 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 					enabled.add(cb.dataset.kind as DwgEntityKind);
 			}
 			state.enabledKinds = enabled;
-			return { ...state, enabledKinds: enabled };
+			// 偏移以输入框当前值为准（change 未触发时也能取到最新输入）。
+			state.originOffsetMil = readOffsetInputs();
+			return { ...state, enabledKinds: enabled, originOffsetMil: { ...state.originOffsetMil } };
 		},
 		setOptions(o: ImportOptions) {
 			state.enabledKinds = new Set(o.enabledKinds);
 			state.defaultLineWidthMil = o.defaultLineWidthMil;
 			state.units = o.units;
 			state.skipEmptyLayers = o.skipEmptyLayers;
+			state.originOffsetMil = o.originOffsetMil ? { ...o.originOffsetMil } : { x: 0, y: 0 };
 			widthSelect.value = String(state.defaultLineWidthMil);
 			unitSelect.value = state.units;
 			skipEmpty.checked = state.skipEmptyLayers;
+			writeOffsetInputs(state.originOffsetMil);
 			rebuildKindGrid(state.enabledKinds);
+		},
+		onPickOrigin(handler: PickOriginHandler) {
+			pickHandler = handler;
+		},
+		setOriginOffset(o: OriginOffset) {
+			state.originOffsetMil = { ...o };
+			writeOffsetInputs(state.originOffsetMil);
 		},
 	};
 }

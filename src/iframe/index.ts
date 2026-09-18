@@ -11,13 +11,14 @@
  * 脚本执行时机不完全受控，故统一在 bootstrap() 中等待 DOM 就绪后再初始化。
  */
 
-import type { ApplyImportPayload, DwgIR, ImportDocumentType, PcbLayerInfo } from '../shared/types';
+import type { ApplyImportPayload, DwgIR, ImportDocumentType, PcbLayerInfo, Rgb } from '../shared/types';
 import type { State } from './state-machine';
 import type { IframeStorage } from './storage';
 import { DOC_TYPE, edaApi, LAYER } from '../shared/eda-api';
 import { t } from '../shared/i18n';
 import { DEFAULT_OPTIONS } from '../shared/types';
 import { applyFootprintImport, applyPcbImport, applySchImport } from '../write/index';
+import { pickOriginOnCanvas } from './canvas-pick';
 import { parseDwg } from './dwg/parser';
 import { createStateMachine } from './state-machine';
 import { createIframeStorage } from './storage';
@@ -27,7 +28,6 @@ import { injectStyles } from './ui/inject-styles';
 import { createLayerMapping } from './ui/layer-mapping';
 import { suggestAllByColor, suggestAllByName } from './ui/layer-suggest-bridge';
 import { createOptionsSection } from './ui/options-section';
-import { createPreviewSection } from './ui/preview-section';
 import stylesCss from './ui/styles.css';
 
 injectStyles(stylesCss);
@@ -83,10 +83,7 @@ function start(): void {
 
 	const layerMap = createLayerMapping(need(mainEl, 'layer-mapping-section'));
 	const optionsSec = createOptionsSection(need(mainEl, 'options-section'));
-	const previewSec = createPreviewSection(need(mainEl, 'preview-section'));
-	const fileSec = createFileSection(need(mainEl, 'file-section'), () => {
-		previewSec.reset();
-	});
+	const fileSec = createFileSection(need(mainEl, 'file-section'));
 
 	const sm = createStateMachine();
 	let currentIr: DwgIR | null = null;
@@ -118,6 +115,23 @@ function start(): void {
 		updateImportBtn(s);
 	});
 
+	// ── 原点偏移：画布拾取 ──────────────────────────────────────
+	optionsSec.onPickOrigin(async () => {
+		const picked = await pickOriginOnCanvas(currentDocType, IFRAME_ID);
+		if (picked) {
+			// 拾取返回文档数据层坐标：PCB/封装为 mil，原理图为 0.01 inch（×10 转 mil）。
+			const mil = currentDocType === 'SCH'
+				? { x: picked.x * 10, y: picked.y * 10 }
+				: picked;
+			optionsSec.setOriginOffset(mil);
+			edaApi()?.sys_Message?.showToastMessage?.(
+				t('Origin offset set: {0}, {1}', String(mil.x), String(mil.y)),
+			);
+			return mil;
+		}
+		return null;
+	});
+
 	function updateImportBtn(s: State): void {
 		importBtn.disabled = s !== 'parsed';
 		if (s === 'parsed' && currentIr) {
@@ -130,7 +144,6 @@ function start(): void {
 
 	// ── 文件选择 → 解析 → 智能建议 ──────────────────────────────
 	fileSec.onFileSelected(async (file) => {
-		previewSec.reset();
 		sm.transition('parsing');
 		fileSec.setStatusParsing(0);
 
@@ -155,8 +168,12 @@ function start(): void {
 
 			layerMap.setLayers(ir.layers, targetLayers);
 			layerMap.setMapping(merged);
-			previewSec.setIr(ir);
-			fileSec.setStatusParsed(ir.entities.length, ir.layers.length);
+			fileSec.setStatusParsed(
+				ir.entities.length,
+				ir.layers.length,
+				resolvedUnitLabel(ir),
+			);
+			reportParseWarnings(ir);
 			sm.transition('parsed');
 		}
 		catch (err) {
@@ -164,6 +181,34 @@ function start(): void {
 			sm.transition('error');
 		}
 	});
+
+	/**
+	 * 解析完成时状态栏显示最终生效的单位。
+	 * 「自动」按 IR 检测结果（INSUNITS）显示；手动选择的单位原样显示。
+	 * 未知/无单位时明确标注「按 mm 处理」——此前单位误判正是放大 25.4 倍的根因，
+	 * 把单位亮出来便于实机核对。
+	 */
+	function resolvedUnitLabel(ir: DwgIR): string {
+		const selected = optionsSec.getOptions().units;
+		const units = selected === 'auto' ? ir.units : selected;
+		return units === 'unknown' ? t('unknown, treated as mm') : units;
+	}
+
+	/**
+	 * 解析警告（如外部参照被跳过）原来展示在预览区；预览区移除后，
+	 * 改为日志留痕 + 一条汇总 toast，保证「跳过 XREF」这类提示不静默丢失。
+	 */
+	function reportParseWarnings(ir: DwgIR): void {
+		if (ir.parseWarnings.length === 0)
+			return;
+		edaApi()?.sys_Log?.warn?.(
+			`[DwgImporter] 解析警告 ×${ir.parseWarnings.length}`,
+			ir.parseWarnings.slice(0, 20),
+		);
+		edaApi()?.sys_Message?.showToastMessage?.(
+			t('Parsed with {0} warning(s). Details are in the log.', String(ir.parseWarnings.length)),
+		);
+	}
 
 	// ── 导入：直接在 iframe 内写图元 ────────────────────────────
 	importBtn.addEventListener('click', () => {
@@ -197,6 +242,20 @@ function start(): void {
 					? await applyFootprintImport(payload, onProgress)
 					: await applyPcbImport(payload, onProgress);
 
+			/*
+			 * 一个都没创建、也没失败 = 全部被映射/选项过滤掉了
+			 * （几乎总是所有图层都停在「不导入」）。
+			 * 此时保持弹窗打开并明确告知原因，而不是显示误导性的
+			 * 「导入完成：0 个图元」后直接关闭——那会让用户以为导入成功了。
+			 */
+			if (result.successCount === 0 && result.failedCount === 0) {
+				sm.transition('error');
+				const message = t('Nothing imported: all layers are unmapped or filtered. Check the layer mapping and options.');
+				fileSec.setStatusError(message);
+				edaApi()?.sys_Message?.showToastMessage?.(message);
+				return;
+			}
+
 			sm.transition('done');
 			edaApi()?.sys_Message?.showToastMessage?.(
 				t('Status: import done, {0} primitives created, {1} failed', String(result.successCount), String(result.failedCount)),
@@ -204,6 +263,22 @@ function start(): void {
 
 			if (result.errors.length > 0) {
 				edaApi()?.sys_Log?.warn?.('[DwgImporter] 首个错误:', result.errors[0]?.message);
+			}
+
+			/*
+			 * 缩放到全部图元（README 承诺了「完成后自动缩放」）。
+			 * DWG 原始坐标换算成 mil 后往往离当前视野很远，
+			 * 不缩放的话用户回到画布只会看到「什么都没有」，
+			 * 从而把成功的导入误报为「没有线条生成」。
+			 */
+			try {
+				const bounds = await edaApi()?.dmt_EditorControl?.zoomToAllPrimitives?.();
+				if (!bounds)
+					edaApi()?.sys_Log?.warn?.('[DwgImporter] zoomToAllPrimitives 返回 false 或 API 缺失，视野未移动');
+			}
+			catch (zoomErr) {
+				// 缩放失败不影响导入结果，仅记录。
+				edaApi()?.sys_Log?.warn?.('[DwgImporter] 导入后缩放失败:', (zoomErr as Error).message);
 			}
 
 			// 关闭弹窗，回到画布查看结果。
@@ -240,28 +315,35 @@ async function detectDocumentType(): Promise<ImportDocumentType | undefined> {
 	}
 }
 
-/** 目标层清单（id 对照 EPCB_LayerId 核实）。 */
+/**
+ * 目标层清单（id 对照 EPCB_LayerId 核实）。
+ *
+ * color 是各层的**近似默认色**（取自 EDA 常见配色，非逐版本精确值），
+ * 供图层建议的颜色匹配使用：matchByColor 会跳过没有 color 的目标层，
+ * 不提供颜色则「按颜色匹配」永远返回空（这是曾经的实际缺陷）。
+ */
 function buildLayerList(docType: ImportDocumentType): PcbLayerInfo[] {
+	const docColor: Rgb = { r: 192, g: 192, b: 192 };
 	if (docType === 'SCH') {
-		return [{ id: LAYER.DOCUMENT, name: 'Document' }];
+		return [{ id: LAYER.DOCUMENT, name: 'Document', color: docColor }];
 	}
 	if (docType === 'FOOTPRINT') {
 		return [
-			{ id: LAYER.TOP_SILKSCREEN, name: 'TopSilkscreen' },
-			{ id: LAYER.MECHANICAL, name: 'Mechanical' },
-			{ id: LAYER.DOCUMENT, name: 'Document' },
-			{ id: LAYER.BOARD_OUTLINE, name: 'BoardOutline' },
+			{ id: LAYER.TOP_SILKSCREEN, name: 'TopSilkscreen', color: { r: 255, g: 255, b: 0 } },
+			{ id: LAYER.MECHANICAL, name: 'Mechanical', color: { r: 128, g: 0, b: 0 } },
+			{ id: LAYER.DOCUMENT, name: 'Document', color: docColor },
+			{ id: LAYER.BOARD_OUTLINE, name: 'BoardOutline', color: { r: 255, g: 0, b: 255 } },
 		];
 	}
 	return [
-		{ id: LAYER.BOARD_OUTLINE, name: 'BoardOutline' },
-		{ id: LAYER.TOP, name: 'TopLayer' },
-		{ id: LAYER.BOTTOM, name: 'BottomLayer' },
-		{ id: LAYER.TOP_SILKSCREEN, name: 'TopSilkscreen' },
-		{ id: LAYER.BOTTOM_SILKSCREEN, name: 'BottomSilkscreen' },
-		{ id: LAYER.TOP_ASSEMBLY, name: 'TopAssembly' },
-		{ id: LAYER.BOTTOM_ASSEMBLY, name: 'BottomAssembly' },
-		{ id: LAYER.MECHANICAL, name: 'Mechanical' },
-		{ id: LAYER.DOCUMENT, name: 'Document' },
+		{ id: LAYER.BOARD_OUTLINE, name: 'BoardOutline', color: { r: 255, g: 0, b: 255 } },
+		{ id: LAYER.TOP, name: 'TopLayer', color: { r: 255, g: 0, b: 0 } },
+		{ id: LAYER.BOTTOM, name: 'BottomLayer', color: { r: 0, g: 0, b: 255 } },
+		{ id: LAYER.TOP_SILKSCREEN, name: 'TopSilkscreen', color: { r: 255, g: 255, b: 0 } },
+		{ id: LAYER.BOTTOM_SILKSCREEN, name: 'BottomSilkscreen', color: { r: 0, g: 255, b: 255 } },
+		{ id: LAYER.TOP_ASSEMBLY, name: 'TopAssembly', color: { r: 128, g: 128, b: 128 } },
+		{ id: LAYER.BOTTOM_ASSEMBLY, name: 'BottomAssembly', color: { r: 128, g: 128, b: 128 } },
+		{ id: LAYER.MECHANICAL, name: 'Mechanical', color: { r: 128, g: 0, b: 0 } },
+		{ id: LAYER.DOCUMENT, name: 'Document', color: docColor },
 	];
 }

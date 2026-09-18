@@ -24,7 +24,11 @@ export const ALL_ENTITY_KINDS: ReadonlyArray<DwgEntityKind> = [
 	'SPLINE',
 ];
 
-export type DwgUnit = 'mm' | 'inch' | 'unknown';
+/**
+ * DWG 图纸单位（来自 INSUNITS 检测或用户手选）。
+ * 'unknown' = 无单位/未声明，按 mm 解释（见 units.ts dwgToMil）。
+ */
+export type DwgUnit = 'mm' | 'cm' | 'm' | 'inch' | 'ft' | 'mil' | 'unknown';
 
 export interface DwgPoint {
 	x: number;
@@ -141,11 +145,22 @@ export const DOCUMENT_TYPE_MAP: Record<ImportDocumentType, number> = {
  */
 export type LayerMapping = Record<string, number | null>;
 
+/**
+ * 原点偏移（画布数据层坐标，PCB/封装为 mil；选项里统一以 mil 存放，SCH 写入时换算）。
+ * 语义：DWG 的 (0,0) 被放置到画布的该坐标上；默认 0,0 = 两原点重合。
+ */
+export interface OriginOffset {
+	x: number;
+	y: number;
+}
+
 export interface ImportOptions {
 	enabledKinds: ReadonlySet<DwgEntityKind>;
 	defaultLineWidthMil: number;
 	units: DwgUnit | 'auto';
 	skipEmptyLayers: boolean;
+	/** 原点偏移（mil）。 */
+	originOffsetMil: OriginOffset;
 }
 
 export const DEFAULT_OPTIONS: ImportOptions = {
@@ -153,6 +168,7 @@ export const DEFAULT_OPTIONS: ImportOptions = {
 	defaultLineWidthMil: 4,
 	units: 'auto',
 	skipEmptyLayers: true,
+	originOffsetMil: { x: 0, y: 0 },
 };
 
 export interface ApplyImportPayload {

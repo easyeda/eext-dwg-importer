@@ -274,12 +274,15 @@ export async function parseDwg(
 
 	options.onProgress?.(100);
 
+	// 单位检测的告警（未声明/无法识别的 INSUNITS）并入解析警告。
+	const parseWarnings = [...expanded.warnings];
+
 	return buildIR({
-		units: detectUnits(db.header?.INSUNITS),
+		units: detectUnits(db.header?.INSUNITS, parseWarnings),
 		layers,
 		blocks,
 		entities: expanded.entities,
-		parseWarnings: expanded.warnings,
+		parseWarnings,
 	});
 }
 
