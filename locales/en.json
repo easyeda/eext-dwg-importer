@@ -46,6 +46,7 @@
 	"Canvas pick is unavailable in this environment": "Canvas pick is unavailable here; please type the coordinates",
 	"Pick timed out. The dialog has been restored.": "Pick timed out. The dialog has been restored.",
 	"Failed to read the canvas position. Please try again.": "Failed to read the canvas position. Please try again.",
+	"Pick failed: {0}": "Pick failed: {0}",
 
 	"Parsed with {0} warning(s). Details are in the log.": "Parsed with {0} warning(s). Details are in the log.",
 

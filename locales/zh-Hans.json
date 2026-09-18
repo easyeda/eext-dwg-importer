@@ -46,6 +46,7 @@
 	"Canvas pick is unavailable in this environment": "当前环境不支持画布拾取，请手动输入坐标",
 	"Pick timed out. The dialog has been restored.": "拾取已超时取消，弹窗已恢复",
 	"Failed to read the canvas position. Please try again.": "未能读取画布坐标，请重试",
+	"Pick failed: {0}": "拾取失败：{0}",
 
 	"Parsed with {0} warning(s). Details are in the log.": "解析完成，但有 {0} 条警告，详见日志",
 

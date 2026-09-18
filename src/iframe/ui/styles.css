@@ -320,8 +320,14 @@ body {
 
 /* ── 原点偏移行 ─────────────────────────────────────────── */
 
+/* 与上方单位行拉开间距，形成「实体类型 / 原点偏移」两个分组的节奏 */
+.sub-label[data-role="offset-label"] {
+	margin-top: 10px;
+}
+
+/* 输入框均分剩余宽度：右栏固定宽下 X/Y 不再拥挤，按钮也不会被挤出新行 */
 .offset-row {
-	gap: 6px;
+	gap: 8px;
 	align-items: center;
 	flex-wrap: nowrap;
 }
@@ -329,17 +335,12 @@ body {
 .offset-comma {
 	color: var(--text-secondary);
 	user-select: none;
-}
-
-.offset-unit {
-	color: var(--text-muted);
-	font-size: 11px;
 	flex: 0 0 auto;
 }
 
 .num-input {
-	width: 72px;
-	flex: 0 1 auto;
+	flex: 1 1 40px;
+	width: auto;
 	min-width: 0;
 	padding: 3px 6px;
 	border: 1px solid var(--border);

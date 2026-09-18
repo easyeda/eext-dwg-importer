@@ -3,6 +3,7 @@
  */
 
 import type { DwgEntityKind, DwgUnit, ImportOptions, OriginOffset } from '../../shared/types';
+import { edaApi } from '../../shared/eda-api';
 import { t } from '../../shared/i18n';
 import { ALL_ENTITY_KINDS } from '../../shared/types';
 import { need } from './dom';
@@ -143,12 +144,20 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 
 	let pickHandler: PickOriginHandler | null = null;
 	pickBtn.addEventListener('click', () => {
+		// 入口日志：实机排查「点击没反应」时，先看这行有没有出现——
+		// 没有说明 DOM 事件没到按钮（布局遮挡等），有则继续看 canvas-pick 的流程日志。
+		edaApi()?.sys_Log?.info?.('[DwgImporter][拾取] 拾取按钮点击');
 		if (!pickHandler || pickBtn.disabled)
 			return;
 		pickBtn.disabled = true;
 		void (async () => {
 			try {
 				await pickHandler();
+			}
+			catch (err) {
+				// 处理器异常不能静默：日志 + toast，且按钮必须恢复可用。
+				edaApi()?.sys_Log?.error?.('[DwgImporter][拾取] 处理器异常:', (err as Error)?.message);
+				edaApi()?.sys_Message?.showToastMessage?.(t('Pick failed: {0}', (err as Error)?.message ?? ''));
 			}
 			finally {
 				pickBtn.disabled = false;

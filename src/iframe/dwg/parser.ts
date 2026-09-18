@@ -65,6 +65,14 @@ interface DwgEntityLike {
 	xScale?: number;
 	yScale?: number;
 	// ATTDEF / ATTRIB
+	// SOLID / 3DFACE（四角；DXF 顶点语义见各 case 注释）
+	corner1?: Point3D;
+	corner2?: Point3D;
+	corner3?: Point3D;
+	corner4?: Point3D;
+	// ELLIPSE
+	majorAxisEndPoint?: Point3D;
+	axisRatio?: number;
 	// 其它
 	[key: string]: unknown;
 }
@@ -362,6 +370,61 @@ function toRaw(e: DwgEntityLike): RawDwgEntity | null {
 				height: e.textHeight ?? 1,
 				rotation: e.rotation ?? 0,
 			};
+		case 'SOLID': {
+			/*
+			 * SOLID 是实心四边形。注意 DXF 顶点序是 1-2-4-3 之字形
+			 * （3、4 相对多边形环绕序互换），按 1-2-3-4 连线会得到蝴蝶结自交。
+			 * 这里导入为闭合轮廓（填充语义丢失，形状保留）。
+			 */
+			return {
+				...common,
+				kind: 'LWPOLYLINE',
+				points: [
+					toPoint2D(e.corner1),
+					toPoint2D(e.corner2),
+					toPoint2D(e.corner4),
+					toPoint2D(e.corner3),
+				],
+				closed: true,
+			};
+		}
+		case '3DFACE':
+			// 三维面的四角本身就是环绕序（1-2-3-4），导入为闭合四边形轮廓。
+			return {
+				...common,
+				kind: 'LWPOLYLINE',
+				points: [
+					toPoint2D(e.corner1),
+					toPoint2D(e.corner2),
+					toPoint2D(e.corner3),
+					toPoint2D(e.corner4),
+				],
+				closed: true,
+			};
+		case 'ELLIPSE':
+			return sampleEllipse(e, common);
+		case 'DIMENSION':
+			/*
+			 * 标注的可见图形存放在其匿名块（*Dn）里——CAD 渲染标注就是渲染该块。
+			 * 块内几何是 WCS 坐标（无需平移），故转成 (0,0) 插入的 INSERT，
+			 * 走统一的块展开路径。name 缺失（无块的异常标注）则跳过。
+			 *
+			 * v1.2.0 前整个 DIMENSION 被跳过，R13 等图纸导入后标注全部消失，
+			 * 与 CAD 显示「相差太远」。
+			 */
+			if (!e.name)
+				return null;
+			return {
+				...common,
+				kind: 'INSERT',
+				blockName: e.name,
+				tx: 0,
+				ty: 0,
+				sx: 1,
+				sy: 1,
+				rotation: 0,
+				mirror: false,
+			};
 		case 'INSERT':
 			return {
 				...common,
@@ -382,6 +445,48 @@ function toRaw(e: DwgEntityLike): RawDwgEntity | null {
 
 function isPolylineClosed(flag: number | undefined): boolean {
 	return typeof flag === 'number' && (flag & 1) !== 0;
+}
+
+/**
+ * ELLIPSE → 参数方程采样成折线（IR 中归入 SPLINE 曲线类）。
+ * 几何：center + majorAxisEndPoint（圆心到长轴端点的向量，含方向与长半轴 a）
+ * + axisRatio（短半轴 b = a × ratio）+ startAngle/endAngle（参数角，弧度）。
+ * 全椭圆采 64 段；椭圆弧按扫掠角比例（至少 8 段）。
+ */
+function sampleEllipse(
+	e: DwgEntityLike,
+	common: { id?: string; layer: string; color?: number; lineWidth?: number },
+): RawDwgEntity | null {
+	const c = e.center;
+	const major = e.majorAxisEndPoint;
+	if (!c || !major)
+		return null;
+	const a = Math.hypot(major.x, major.y);
+	if (!Number.isFinite(a) || a === 0)
+		return null;
+	const b = a * (e.axisRatio ?? 1);
+	const rot = Math.atan2(major.y, major.x);
+	const start = e.startAngle ?? 0;
+	const end = e.endAngle ?? Math.PI * 2;
+	const sweep = end - start;
+	const isFull = Math.abs(Math.abs(sweep) - Math.PI * 2) < 1e-6;
+	const segs = isFull
+		? 64
+		: Math.max(8, Math.ceil((Math.abs(sweep) / (Math.PI * 2)) * 64));
+	const points: DwgPoint[] = [];
+	for (let i = 0; i <= segs; i++) {
+		const t = start + (sweep * i) / segs;
+		const ex = a * Math.cos(t);
+		const ey = b * Math.sin(t);
+		points.push({
+			x: c.x + ex * Math.cos(rot) - ey * Math.sin(rot),
+			y: c.y + ex * Math.sin(rot) + ey * Math.cos(rot),
+		});
+	}
+	// 全椭圆首尾重合：去掉重复末点，用 closed 表达闭合。
+	if (isFull)
+		points.pop();
+	return { ...common, kind: 'SPLINE', points, closed: isFull };
 }
 
 function toPoint2D(p: Point3D | undefined): DwgPoint {
