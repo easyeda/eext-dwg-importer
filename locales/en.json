@@ -15,6 +15,7 @@
 	"Status: idle": "Status: idle",
 	"Status: parsing {0}%": "Status: parsing {0}%",
 	"Status: parsed, {0} primitives, {1} layers, unit {2}": "Status: parsed, {0} primitives, {1} layers, unit {2}",
+	"Extents: {0} × {1} (drawing units)": "Extents: {0} × {1} (drawing units)",
 	"unknown, treated as mm": "unknown, treated as mm",
 	"Status: parse failed: {0}": "Status: parse failed: {0}",
 	"Status: importing {0}/{1}": "Status: importing {0}/{1}",

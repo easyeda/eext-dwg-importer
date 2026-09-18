@@ -19,6 +19,7 @@ import { t } from '../shared/i18n';
 import { DEFAULT_OPTIONS } from '../shared/types';
 import { applyFootprintImport, applyPcbImport, applySchImport } from '../write/index';
 import { pickOriginOnCanvas } from './canvas-pick';
+import { computeBoundingBox } from './dwg/ir';
 import { parseDwg } from './dwg/parser';
 import { createStateMachine } from './state-machine';
 import { createIframeStorage } from './storage';
@@ -91,6 +92,7 @@ function start(): void {
 	const fileSec = createFileSection(need(mainEl, 'file-section'), {
 		name: need(mainEl, 'file-name'),
 		status: need(mainEl, 'status'),
+		size: need(mainEl, 'file-size'),
 	});
 
 	const sm = createStateMachine();
@@ -170,10 +172,13 @@ function start(): void {
 
 			layerMap.setLayers(ir.layers, targetLayers);
 			layerMap.setMapping(merged);
+			// 整体 bbox（图纸原始单位）：数值量级是用户选导入单位的直接依据。
+			const bbox = computeBoundingBox(ir.entities);
 			fileSec.setStatusParsed(
 				ir.entities.length,
 				ir.layers.length,
 				resolvedUnitLabel(ir),
+				{ width: bbox.maxX - bbox.minX, height: bbox.maxY - bbox.minY },
 			);
 			reportParseWarnings(ir);
 			sm.transition('parsed');

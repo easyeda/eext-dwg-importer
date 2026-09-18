@@ -22,6 +22,10 @@
  * （丝印/文档/板框/机械层等）必须传 undefined 省略——传 '' 会被按电气图元
  * 校验而报 [INVALID_LAYER]；信号层传 '' 表示无网络。经 NET = isPcbSignalLayer() 决定。
  *
+ * ⚠️ 图元按层语义（实测）：导线（Track = pcb_PrimitiveLine）是严格的电气图元，
+ * 仅信号层可用（省略 net 也不行）；图形层的直线一律用折线（Polyline）两点表达。
+ * 圆弧（ArcTrack）在图形层省略 net 即可用。
+ *
  * ⚠️ 失败必须可见：所有 create() 返回 `Promise<IPCB_* | undefined>`，
  * undefined 表示创建失败。本文件统一经 countCreated() 检查返回值，
  * 并在导入开始前做环境预检（缺 API 直接抛错），杜绝「静默 0 导入」。
@@ -178,17 +182,45 @@ async function writeOne(
 	try {
 		switch (e.kind) {
 			case 'LINE': {
-				const created = await eda.pcb_PrimitiveLine?.create?.(
-					NET,
-					targetLayer,
-					CX(e.start.x),
-					CY(e.start.y),
-					CX(e.end.x),
-					CY(e.end.y),
-					ctx.width,
-					false,
-				);
-				countCreated(result, e, created);
+				/*
+				 * 零长度线段直接跳过：DWG 里偶见首尾重合的垃圾线段，
+				 * 创建出的零尺寸图元无法选中也无法删除（实机表现为幽灵对象），
+				 * 且在任何查看器里都不可见，跳过不损失图形。
+				 */
+				if (e.start.x === e.end.x && e.start.y === e.end.y) {
+					eda.sys_Log?.info?.('[DwgImporter] 跳过零长度线段', e.layer);
+					break;
+				}
+				/*
+				 * 导线（Track，即 pcb_PrimitiveLine）是**严格的电气图元**：
+				 * 实测（v1.1.1）即使省略 net，非信号层也一律报 [INVALID_LAYER]
+				 * （与 ArcTrack 不同——后者省略 net 即可在图形层画弧）。
+				 * 因此图形层（丝印/文档/板框等）的直线改用折线（Polyline）表达：
+				 * 两点开放折线即直线，官方示例即开放路径（L 形三顶点）。
+				 */
+				if (isPcbSignalLayer(targetLayer)) {
+					const created = await eda.pcb_PrimitiveLine?.create?.(
+						NET,
+						targetLayer,
+						CX(e.start.x),
+						CY(e.start.y),
+						CX(e.end.x),
+						CY(e.end.y),
+						ctx.width,
+						false,
+					);
+					countCreated(result, e, created);
+					break;
+				}
+				const lineSrc: PcbPolygonSource = [CX(e.start.x), CY(e.start.y), 'L', CX(e.end.x), CY(e.end.y)];
+				const linePolygon = eda.pcb_MathPolygon?.createPolygon?.(lineSrc);
+				if (!linePolygon) {
+					result.failedCount += 1;
+					pushError(result, e, '折线源数据被 EDA 判为不合法（createPolygon 返回 undefined）');
+					break;
+				}
+				const lineCreated = await eda.pcb_PrimitivePolyline?.create?.(NET, targetLayer, linePolygon, ctx.width, false);
+				countCreated(result, e, lineCreated);
 				break;
 			}
 
@@ -223,6 +255,11 @@ async function writeOne(
 			case 'POLYLINE':
 			case 'SPLINE': {
 				const isCircle = e.kind === 'CIRCLE';
+				// 零半径圆与零长度线段同理：会产生零尺寸幽灵图元，直接跳过。
+				if (isCircle && !(e.radius > 0)) {
+					eda.sys_Log?.info?.('[DwgImporter] 跳过零半径圆', e.layer);
+					break;
+				}
 				const pts = isCircle
 					? circlePoints(e.center, e.radius, 64)
 					: e.points;

@@ -15,6 +15,7 @@
 	"Status: idle": "状态：待选文件",
 	"Status: parsing {0}%": "状态：解析中 {0}%",
 	"Status: parsed, {0} primitives, {1} layers, unit {2}": "状态：已解析，{0} 个图元，{1} 个图层，单位 {2}",
+	"Extents: {0} × {1} (drawing units)": "图元尺寸：{0} × {1}（图纸单位）",
 	"unknown, treated as mm": "未知，按 mm 处理",
 	"Status: parse failed: {0}": "状态：解析失败：{0}",
 	"Status: importing {0}/{1}": "状态：导入中 {0}/{1}",

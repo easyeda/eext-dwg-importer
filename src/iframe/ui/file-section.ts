@@ -9,17 +9,28 @@
 import { t } from '../../shared/i18n';
 import { need } from './dom';
 
-/** 文件状态条的两组标签节点（位于右栏顶部，由 index.ts 从 main 范围查找）。 */
+/** 文件状态条的标签节点（位于右栏顶部，由 index.ts 从 main 范围查找）。 */
 export interface FileSectionLabels {
 	name: HTMLElement;
 	status: HTMLElement;
+	/** 全部图元的整体 bbox 尺寸行（解析成功后显示，用于判断导入单位）。 */
+	size: HTMLElement;
 }
 
 export interface FileSection {
 	setStatusIdle: () => void;
 	setStatusParsing: (percent: number) => void;
-	/** @param unitLabel 已解析出的图纸单位（显示出来便于核对换算是否正确）。 */
-	setStatusParsed: (entityCount: number, layerCount: number, unitLabel: string) => void;
+	/**
+	 * @param unitLabel 已解析出的图纸单位（显示出来便于核对换算是否正确）。
+	 * @param size 全部图元的整体包围盒（图纸原始单位）——用户据此判断该用
+	 *   哪个单位导入（如 297×210 大概率是 mm 的 A4 图框）。
+	 */
+	setStatusParsed: (
+		entityCount: number,
+		layerCount: number,
+		unitLabel: string,
+		size: { width: number; height: number },
+	) => void;
 	setStatusError: (message: string) => void;
 	onFileSelected: (cb: (file: File) => void) => void;
 	destroy: () => void;
@@ -40,6 +51,10 @@ export function createFileSection(
 	const fileInput = need(root, 'file-input') as HTMLInputElement;
 	const nameLabel = labels.name;
 	const statusLabel = labels.status;
+	const sizeLabel = labels.size;
+
+	/** 尺寸数字：最多两位小数并去掉尾随零（297.00 → 297，210.56 → 210.56）。 */
+	const fmtNum = (n: number): string => Number(n.toFixed(2)).toString();
 
 	// 拖拽区本身即点击入口（不再单独放「选择文件」按钮）。
 	drop.textContent = t('Drop DWG file here or click to select');
@@ -79,20 +94,30 @@ export function createFileSection(
 	const section: FileSection = {
 		setStatusIdle() {
 			statusLabel.textContent = t('Status: idle');
+			sizeLabel.textContent = '';
 		},
 		setStatusParsing(percent: number) {
 			statusLabel.textContent = t('Status: parsing {0}%', String(percent));
+			sizeLabel.textContent = '';
 		},
-		setStatusParsed(entityCount: number, layerCount: number, unitLabel: string) {
+		setStatusParsed(entityCount: number, layerCount: number, unitLabel: string, size: { width: number; height: number }) {
 			statusLabel.textContent = t(
 				'Status: parsed, {0} primitives, {1} layers, unit {2}',
 				String(entityCount),
 				String(layerCount),
 				unitLabel,
 			);
+			// 整体 bbox 用图纸原始单位显示：数值的量级本身就是选单位的依据
+			// （如 297×210 → mm 图框；11.7×8.3 → inch；×1000 量级 → 单位声明缺失）。
+			sizeLabel.textContent = t(
+				'Extents: {0} × {1} (drawing units)',
+				fmtNum(size.width),
+				fmtNum(size.height),
+			);
 		},
 		setStatusError(message: string) {
 			statusLabel.textContent = t('Status: parse failed: {0}', message);
+			sizeLabel.textContent = '';
 		},
 		onFileSelected(cb) {
 			handlers.push(cb);
