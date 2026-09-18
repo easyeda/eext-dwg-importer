@@ -13,8 +13,13 @@
  * 3. 监听 'all' 鼠标事件：selected（点到图元）或 clearSelected（点到空白）
  *    任一触发即视为用户完成了点击，此刻读取 getCurrentMousePosition()
  *    作为拾取坐标；我们自己程序化选中产生的临时图元命中事件会被忽略；
- *    move 事件直接忽略；
+ *    move 事件直接忽略。预选中的程序化选中事件可能异步晚到，注册完成后
+ *    有 600ms 宽限期，期内事件一律忽略，避免弹窗刚隐藏就被自己弹回；
  * 4. 清理：移除监听、删除临时图元、移除提示、showIFrame 恢复弹窗。
+ *
+ * 弹窗隐藏兜底：hideIFrame 是结果导向 API，个别版本可能「返回 true 但
+ * 未真正隐藏」——调用后用 window.frameElement 校验实际可见性，
+ * 仍可见时直接隐藏本扩展自己的弹窗容器 DOM（cleanup 原样恢复）。
  *
  * 返回坐标为当前文档数据层坐标（PCB/封装：mil；原理图：0.01 inch），
  * 由调用方负责换算成选项里统一使用的 mil。
@@ -90,25 +95,33 @@ export async function pickOriginOnCanvas(
 	if (!showIFrame)
 		missing.push('sys_IFrame.showIFrame');
 	if (missing.length > 0) {
-		// 缺关键能力：拾取无法进行。明确告知（日志点名 + toast）。
+		// 缺关键能力：拾取无法进行。明确告知（日志点名 + toast 带上缺什么）。
 		eda.sys_Log?.warn?.('[DwgImporter][拾取] 环境缺少必需 API:', missing.join(', '));
-		msg?.showToastMessage?.(t('Canvas pick is unavailable in this environment'));
+		msg?.showToastMessage?.(t('Canvas pick is unavailable (missing: {0})', missing.join(', ')));
 		return null;
 	}
 	/*
 	 * 显式收窄：上面的 missing 数组检查 TS 无法推导为非空保证，
 	 * 而后续全部在闭包里使用这些 const，必须在进入闭包前收窄完成。
+	 * eventNs 一并收窄（注册回读 isEventListenerAlreadyExist 需要用它）。
 	 */
-	if (!addListener || !getMousePos || !hideIFrame || !showIFrame)
+	if (!addListener || !getMousePos || !hideIFrame || !showIFrame || !eventNs)
 		return null;
 	// showFollowMouseTip 是可选体验：缺失时降级为 toast，不作为预检失败条件。
 	const hasFollowTip = typeof msg?.showFollowMouseTip === 'function';
 	log('能力检查通过', hasFollowTip ? '含跟随提示' : '无跟随提示（降级 toast）');
 
+	// 进入拾取模式的可见确认：若点击图标后连这条 toast 都没出现，
+	// 说明点击事件根本没到达按钮（DOM 问题），而非拾取逻辑问题。
+	msg?.showToastMessage?.(t('Pick mode: click a position on the canvas'));
+
 	return await new Promise<CanvasPickResult | null>((resolve) => {
 		let settled = false;
 		let tempId: string | null = null;
 		let timer: ReturnType<typeof setTimeout> | undefined;
+		// 宽限期截止时间：预选中的程序化选中事件可能异步晚到，
+		// 在此之前的 selected/clearSelected 一律视为自身动作而非用户点击。
+		let graceUntil = 0;
 
 		const stopTimer = (): void => {
 			if (timer !== undefined) {
@@ -118,6 +131,9 @@ export async function pickOriginOnCanvas(
 		};
 
 		const cleanup = async (): Promise<void> => {
+			// DOM 兜底隐藏的恢复要放在 showIFrame 之前：即便 showIFrame
+			// 在个别版本未生效，恢复 display 也能把弹窗带回来。
+			restoreDialogDom(log);
 			try {
 				removeListener?.(LISTENER_ID);
 			}
@@ -165,6 +181,11 @@ export async function pickOriginOnCanvas(
 			// 高频 move 事件直接忽略。
 			if (eventType !== 'selected' && eventType !== 'clearSelected')
 				return;
+			// 宽限期：过滤预选中动作异步晚到的自身事件（详见 graceUntil 注释）。
+			if (Date.now() < graceUntil) {
+				log('宽限期内忽略自身事件', eventType);
+				return;
+			}
 			// 忽略我们自己对临时图元的程序化选中。
 			if (eventType === 'selected' && props?.some(p => p?.primitiveId === tempId)) {
 				log(`忽略程序化选中事件（tempId=${tempId}）`);
@@ -192,6 +213,9 @@ export async function pickOriginOnCanvas(
 				msg?.showToastMessage?.(t('Canvas pick is unavailable in this environment'));
 				return;
 			}
+			// 结果校验 + DOM 兜底：个别版本的 iframeDialog 可能未真正隐藏。
+			if (isFrameVisible())
+				hideDialogDom(log);
 			log('弹窗已隐藏，等待画布点击');
 
 			const tip = t('Click on the canvas to pick the origin position');
@@ -216,12 +240,29 @@ export async function pickOriginOnCanvas(
 				// 防重复注册：同 id 的旧监听先移除（首次为 no-op）。
 				removeListener?.(LISTENER_ID);
 				addListener(LISTENER_ID, 'all', onMouse, false);
+				// 注册回读（官方示例用法）：addMouseEventListener 返回 void，
+				// 只有回读才能确认注册真的成功——失败立即中止并留痕，
+				// 而不是等用户点完画布毫无反应、60s 超时。
+				const registered = eventNs.isEventListenerAlreadyExist?.(LISTENER_ID);
+				if (registered === false) {
+					eda.sys_Log?.error?.('[DwgImporter][拾取] 监听注册回读失败（isEventListenerAlreadyExist=false）');
+					settle(null);
+					msg?.showToastMessage?.(t('Canvas pick is unavailable in this environment'));
+					return;
+				}
+				log('监听注册已回读确认', String(registered));
 			}
 			catch (err) {
 				eda.sys_Log?.error?.('[DwgImporter][拾取] 监听注册失败:', (err as Error)?.message);
 				settle(null);
 				msg?.showToastMessage?.(t('Canvas pick is unavailable in this environment'));
+				return;
 			}
+
+			// 预选动作完成后再开闸：其自身事件可能异步晚到，
+			// 宽限期内的事件一律忽略，避免「弹窗刚隐藏就被自己弹回」。
+			graceUntil = Date.now() + 600;
+			log('监听已注册，等待画布点击');
 		})().catch((err: Error) => {
 			// 流程中任何未预期异常：恢复弹窗，绝不静默。
 			eda.sys_Log?.error?.('[DwgImporter][拾取] 流程异常:', err?.message);
@@ -229,6 +270,71 @@ export async function pickOriginOnCanvas(
 			msg?.showToastMessage?.(t('Canvas pick is unavailable in this environment'));
 		});
 	});
+}
+
+/**
+ * DOM 兜底隐藏的状态记录。仅当 hideIFrame 调用后弹窗实际仍可见时才使用。
+ */
+let domHiddenEl: HTMLElement | null = null;
+
+/**
+ * 检查宿主页中本 iframe 是否仍可见。
+ * blob 页面继承创建者源，frameElement 通常可访问；不可访问（跨域）时视为可见。
+ */
+function isFrameVisible(): boolean {
+	try {
+		const fe = window.frameElement as HTMLElement | null;
+		if (!fe)
+			return true;
+		let el: HTMLElement | null = fe;
+		while (el && el !== el.ownerDocument.body) {
+			if (getComputedStyle(el).display === 'none')
+				return false;
+			el = el.parentElement;
+		}
+		return true;
+	}
+	catch {
+		return true;
+	}
+}
+
+/**
+ * 兜底：直接隐藏宿主页中的弹窗容器（含遮罩）。
+ * 目标取「最近的可对话框容器之父层」——遮罩一般是 box 的兄弟节点，
+ * 而该父层是本扩展自己的根容器（#<uuid>.<id>），不影响其它扩展；
+ * 全程 try/catch + 记录被隐藏节点，cleanup 时原样恢复。
+ */
+function hideDialogDom(log: (message: string, ...args: unknown[]) => void): void {
+	try {
+		const fe = window.frameElement as HTMLElement | null;
+		if (!fe)
+			return;
+		const box = fe.closest<HTMLElement>('[class*="lc_modal_dialog_box"]');
+		const target = (box?.parentElement ?? box ?? fe.parentElement) as HTMLElement | null;
+		if (!target || target === fe.ownerDocument.body)
+			return;
+		if (getComputedStyle(target).display === 'none')
+			return;
+		target.style.display = 'none';
+		domHiddenEl = target;
+		log('hideIFrame 未见生效，已直接隐藏弹窗容器 DOM');
+	}
+	catch (err) {
+		log('DOM 隐藏兜底不可用:', (err as Error)?.message);
+	}
+}
+
+/** 恢复由 hideDialogDom 隐藏的节点。 */
+function restoreDialogDom(log: (message: string, ...args: unknown[]) => void): void {
+	try {
+		if (domHiddenEl) {
+			domHiddenEl.style.display = '';
+			domHiddenEl = null;
+			log('弹窗容器 DOM 显示已恢复');
+		}
+	}
+	catch { /* 恢复失败不影响结果 */ }
 }
 
 function getSelectNs(eda: EdaGlobals, isSch: boolean): EdaGlobals['pcb_SelectControl'] {
@@ -261,9 +367,13 @@ async function ensureSelectedPrimitive(eda: EdaGlobals, isSch: boolean): Promise
 
 	// ② 文档为空：创建并选中临时图元（拾取结束由调用方删除）。
 	try {
+		/*
+		 * net 必须省略（undefined）：临时图元建在图形层（Document），
+		 * 传空串会被按电气图元校验而报 [INVALID_LAYER]，导致空文档拾取退化。
+		 */
 		const temp = isSch
 			? await eda.sch_PrimitiveRectangle?.create?.(0, 0, 1, 1)
-			: await eda.pcb_PrimitiveLine?.create?.('', LAYER.DOCUMENT, 0, 0, 1, 0, 1, false);
+			: await eda.pcb_PrimitiveLine?.create?.(undefined, LAYER.DOCUMENT, 0, 0, 1, 0, 1, false);
 		const id = (temp as PrimitiveLike | undefined)?.getState_PrimitiveId?.() ?? null;
 		if (!id)
 			return null;

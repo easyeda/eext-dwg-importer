@@ -90,7 +90,7 @@ body {
 	overflow: hidden;
 }
 
-/* 左栏较宽（图层映射表），右栏固定宽度（选项 + 预览） */
+/* 左栏较宽（文件选择 + 图层映射表），右栏固定宽度（文件状态条 + 选项） */
 .col {
 	display: flex;
 	flex-direction: column;
@@ -147,10 +147,18 @@ body {
 	font-size: 12px;
 }
 
+/*
+ * 拖拽区独占文件卡片：文件信息移到右栏顶部后，把释放出的纵向空间
+ * 还给选择区（min-height 拉大，拖放目标更明显、也更容易点中）。
+ */
 .dropzone {
 	border: 2px dashed var(--border);
 	border-radius: var(--radius);
 	padding: 18px 12px;
+	min-height: 148px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	text-align: center;
 	cursor: pointer;
 	color: var(--text-secondary);
@@ -164,12 +172,36 @@ body {
 	color: var(--text-primary);
 }
 
-.file-meta {
-	display: flex;
-	justify-content: space-between;
-	margin-top: 8px;
+/* ── 右栏顶部文件状态条 ─────────────────────────────────── */
+
+/* 比 .card 更紧凑：一条状态条，不与选项卡片争高度 */
+.file-status-card {
+	padding: 8px 10px;
+	flex: 0 0 auto;
+}
+
+.file-name {
+	font-weight: 600;
+	font-size: 12px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 空状态时内容为空，避免占出一条空行 */
+.file-name:empty {
+	display: none;
+}
+
+.status-line {
 	color: var(--text-secondary);
 	font-size: 12px;
+	margin-top: 2px;
+	word-break: break-all;
+}
+
+.status-line:empty {
+	display: none;
 }
 
 .btn {
@@ -320,9 +352,9 @@ body {
 
 /* ── 原点偏移行 ─────────────────────────────────────────── */
 
-/* 与上方单位行拉开间距，形成「实体类型 / 原点偏移」两个分组的节奏 */
+/* 与上方单位行拉开明显间距，形成「实体类型 / 原点偏移」两个分组的节奏 */
 .sub-label[data-role="offset-label"] {
-	margin-top: 10px;
+	margin-top: 16px;
 }
 
 /* 输入框均分剩余宽度：右栏固定宽下 X/Y 不再拥挤，按钮也不会被挤出新行 */

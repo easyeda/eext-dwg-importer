@@ -9,3 +9,6 @@ debug.log
 /.dsh/
 /.npm-cache/
 /build/dist/
+# wasm 解析引擎读 DWG 时留下的锁/备份文件（本地诊断产物，永不入库）
+*.lck
+*.bak

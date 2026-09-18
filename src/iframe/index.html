@@ -37,8 +37,8 @@
 		<div id="app" class="app">
 			<!--
 				左右两栏布局：
-				  左栏 = 文件选择 + 图层映射（图层较多，仅此区域内部滚动）
-				  右栏 = 选项（固定宽度，内容量稳定）
+				  左栏 = 文件选择（拖拽区）+ 图层映射（图层较多，仅此区域内部滚动）
+				  右栏 = 文件状态条（名称/大小/解析状态）+ 选项（固定宽度）
 				底部 footer 由 .app 的纵向 flex 固定在底部，不随内容滚动。
 				整体不出现页面级滚动条（body overflow: hidden）。
 			-->
@@ -47,10 +47,6 @@
 					<section data-role="file-section" class="card">
 						<div data-role="dropzone" class="dropzone"></div>
 						<input data-role="file-input" type="file" accept=".dwg" hidden />
-						<div class="file-meta">
-							<span data-role="file-name"></span>
-							<span data-role="status"></span>
-						</div>
 					</section>
 
 					<section data-role="layer-mapping-section" class="card card-grow">
@@ -78,6 +74,11 @@
 				</div>
 
 				<div class="col col-right">
+					<section data-role="file-status-section" class="card file-status-card">
+						<div data-role="file-name" class="file-name"></div>
+						<div data-role="status" class="status-line"></div>
+					</section>
+
 					<section data-role="options-section" class="card card-grow">
 						<div data-role="title" class="card-title"></div>
 						<div data-role="kind-label" class="sub-label"></div>

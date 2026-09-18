@@ -85,7 +85,9 @@ export async function importDwg(documentType: ImportDocumentType): Promise<void>
 			 */
 			title: eda?.sys_I18n?.text?.('Import DWG') ?? 'Import DWG',
 			maximizeButton: false,
-			minimizeButton: false,
+			// 最小化 = 折叠成标题栏（collapsed）：导入参数确认期间可收起弹窗查看画布。
+			minimizeButton: true,
+			minimizeStyle: 'collapsed',
 			grayscaleMask: false,
 		});
 

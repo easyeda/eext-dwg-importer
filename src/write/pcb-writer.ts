@@ -18,6 +18,10 @@
  * 多边形通过 eda.pcb_MathPolygon.createPolygon([x1, y1, 'L', x2, y2, ...]) 构造
  * （首坐标点在 'L' 之前，官方示例即此格式）。
  *
+ * ⚠️ net 按层语义（实测）：Line/Arc/Polyline 的 net 参数在非信号层
+ * （丝印/文档/板框/机械层等）必须传 undefined 省略——传 '' 会被按电气图元
+ * 校验而报 [INVALID_LAYER]；信号层传 '' 表示无网络。经 NET = isPcbSignalLayer() 决定。
+ *
  * ⚠️ 失败必须可见：所有 create() 返回 `Promise<IPCB_* | undefined>`，
  * undefined 表示创建失败。本文件统一经 countCreated() 检查返回值，
  * 并在导入开始前做环境预检（缺 API 直接抛错），杜绝「静默 0 导入」。
@@ -32,7 +36,7 @@ import type {
 	DwgUnit,
 	LayerMapping,
 } from '../shared/types';
-import { edaApi } from '../shared/eda-api';
+import { edaApi, isPcbSignalLayer } from '../shared/eda-api';
 import { dwgToMil, radToDeg } from '../shared/units';
 import { countCreated, pushError } from './apply-result';
 
@@ -143,6 +147,13 @@ async function writeOne(
 	const CX = (v: number): number => ctx.offset.x + dwgToMil(v, ctx.units);
 	const CY = (v: number): number => ctx.offset.y + dwgToMil(v, ctx.units);
 	const LN = (v: number): number => dwgToMil(v, ctx.units);
+	/*
+	 * net 按层选择（实测依据，v1.1.1）：信号层传 ''（无网络）；
+	 * 丝印/文档等图形层必须**省略 net**（undefined）——传空串会被按
+	 * 电气图元校验而报 [INVALID_LAYER]（丝印层是用户映射的常见目标，
+	 * 此前固定传 '' 导致丝印导入全线失败）。
+	 */
+	const NET = isPcbSignalLayer(targetLayer) ? '' : undefined;
 	/**
 	 * 构造单多边形源数组。
 	 *
@@ -168,7 +179,7 @@ async function writeOne(
 		switch (e.kind) {
 			case 'LINE': {
 				const created = await eda.pcb_PrimitiveLine?.create?.(
-					'',
+					NET,
 					targetLayer,
 					CX(e.start.x),
 					CY(e.start.y),
@@ -192,7 +203,7 @@ async function writeOne(
 				while (sweepDeg < -360)
 					sweepDeg += 360;
 				const created = await eda.pcb_PrimitiveArc?.create?.(
-					'',
+					NET,
 					targetLayer,
 					CX(p1.x),
 					CY(p1.y),
@@ -228,7 +239,7 @@ async function writeOne(
 					pushError(result, e, '多边形源数据被 EDA 判为不合法（createPolygon 返回 undefined）');
 					break;
 				}
-				const created = await eda.pcb_PrimitivePolyline?.create?.('', targetLayer, polygon, ctx.width, false);
+				const created = await eda.pcb_PrimitivePolyline?.create?.(NET, targetLayer, polygon, ctx.width, false);
 				countCreated(result, e, created);
 				break;
 			}

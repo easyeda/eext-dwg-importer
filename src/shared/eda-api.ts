@@ -179,7 +179,13 @@ export interface EdaGlobals {
 	};
 	pcb_PrimitiveLine?: {
 		create?: (
-			net: string,
+			/*
+			 * net 语义（实测依据，v1.1.1）：非信号层（丝印/文档/板框等）必须**省略**
+			 * net（传 undefined）——传空串会被按电气图元校验，报
+			 * [INVALID_LAYER] 仅允许信号层；ArcTrack 的报错原文即提示
+			 * 「如需在图形层画弧请不传 net」。信号层传 ''（无网络）即可。
+			 */
+			net: string | undefined,
 			layer: number,
 			startX: number,
 			startY: number,
@@ -193,7 +199,7 @@ export interface EdaGlobals {
 	};
 	pcb_PrimitivePolyline?: {
 		create?: (
-			net: string,
+			net: string | undefined,
 			layer: number,
 			polygon: PcbPolygonLike,
 			lineWidth?: number,
@@ -213,7 +219,8 @@ export interface EdaGlobals {
 	};
 	pcb_PrimitiveArc?: {
 		create?: (
-			net: string,
+			// 与 PrimitiveLine 同规则：图形层省略 net，信号层传 ''。
+			net: string | undefined,
 			layer: number,
 			startX: number,
 			startY: number,
@@ -360,7 +367,23 @@ export const LAYER = {
 	DOCUMENT: 13,
 	MECHANICAL: 14,
 	INNER_1: 15,
+	INNER_30: 44,
+	CUSTOM_1: 71,
+	CUSTOM_30: 100,
 } as const;
+
+/**
+ * 是否信号层（铜箔层）：Top(1) / Bottom(2) / 内层(15–44)。
+ * 依据 EPCB_LayerId 枚举（INNER_1=15 连续到 INNER_30=44）。
+ *
+ * 用途：Track/ArcTrack 等电气图元仅允许信号层；往丝印/文档等图形层画时
+ * 必须省略 net（见各 create 契约注释），否则运行时报 [INVALID_LAYER]。
+ */
+export function isPcbSignalLayer(layerId: number): boolean {
+	return layerId === LAYER.TOP
+		|| layerId === LAYER.BOTTOM
+		|| (layerId >= LAYER.INNER_1 && layerId <= LAYER.INNER_30);
+}
 
 /** EDMT_EditorDocumentType 关键取值。 */
 export const DOC_TYPE = {

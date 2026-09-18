@@ -79,7 +79,7 @@ docs/                   PRD.md / TECH.md
 
 - 产物：`dist/index.js`（IIFE，globalName `edaEsbuildExportName`，minify=false——这两个是 SDK 约束勿改）+ `dist/iframe/index.js|html` + `dist/vendor/libredwg-web/*`。
 - `build/dev.ts`（`npm run debug`）：构建 → 打包 .eext → base64 经 WebSocket(59394) 推给 EDA 客户端热更新。
-- `.edaignore` 决定 .eext 包内容：src/build/config/docs/vendor 等全部排除，只带 dist/ 与 locales；仓库根 `vendor/` 排除是为了避免 wasm 打两份（包体 2.29 MB → 4.52 MB）。
+- `.edaignore` 决定 .eext 包内容：src/build/config/docs/case/vendor 等全部排除，只带 dist/ 与 locales；仓库根 `vendor/` 排除是为了避免 wasm 打两份（包体 2.29 MB → 4.52 MB）。`case/` 是本地解析诊断用的测试图纸；`*.lck`/`*.bak`（wasm 引擎读 DWG 留下的锁/备份文件）被全局排除——打包时流式读到被占用的文件会让 zip 断流，产出没有中央目录的损坏 .eext（EDA 导入报 Corrupted zip）。
 - `build/dev.ts` 启动时会用 `fixUuid()` 修复非法 uuid——若被触发，需人工确认 `extension.json` 的 uuid 仍以字母开头（见铁律 6）。
 
 ## 已知环境噪声（不是本扩展的 bug）

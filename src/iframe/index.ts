@@ -78,12 +78,20 @@ function start(): void {
 	const importBtn = need<HTMLButtonElement>(footerEl, 'import-btn');
 	const cancelBtn = need<HTMLButtonElement>(footerEl, 'cancel-btn');
 
+	/*
+	 * 导入按钮文案固定为「导入」（用户要求不随状态变化）；
+	 * 状态机只控制 disabled，进度展示由右侧文件状态条承担。
+	 */
 	cancelBtn.textContent = t('Cancel');
 	importBtn.textContent = t('Import');
 
 	const layerMap = createLayerMapping(need(mainEl, 'layer-mapping-section'));
 	const optionsSec = createOptionsSection(need(mainEl, 'options-section'));
-	const fileSec = createFileSection(need(mainEl, 'file-section'));
+	// 文件状态条在右栏顶部（file-status-section），文件选择区只在左栏持有拖拽区。
+	const fileSec = createFileSection(need(mainEl, 'file-section'), {
+		name: need(mainEl, 'file-name'),
+		status: need(mainEl, 'status'),
+	});
 
 	const sm = createStateMachine();
 	let currentIr: DwgIR | null = null;
@@ -134,12 +142,6 @@ function start(): void {
 
 	function updateImportBtn(s: State): void {
 		importBtn.disabled = s !== 'parsed';
-		if (s === 'parsed' && currentIr) {
-			importBtn.textContent = t('Import {0} primitives', String(currentIr.entities.length));
-		}
-		else {
-			importBtn.textContent = t('Import');
-		}
 	}
 
 	// ── 文件选择 → 解析 → 智能建议 ──────────────────────────────
