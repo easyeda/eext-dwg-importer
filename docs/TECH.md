@@ -1,4 +1,4 @@
-# 技术文档 — DWG Importer for EasyEDA Pro
+# 技术文档 — Import DWG for EasyEDA Pro
 
 > 版本：v1.1 (与 PRD v0.3 对齐；已按实测结果修正 iframe 架构与层 id)
 > 范围：在 PRD 已确认的产品决策之上，给出可实施的技术设计。
@@ -897,7 +897,7 @@ export function activate(status?: 'onStartupFinished', arg?: string): void {
 
 export function about(): void {
   eda.sys_Dialog.showInformationMessage(
-    eda.sys_I18n.text('DWG Importer v', undefined, undefined, extensionConfig.version),
+    eda.sys_I18n.text('Import DWG v', undefined, undefined, extensionConfig.version),
     eda.sys_I18n.text('About'),
   );
 }
@@ -1065,7 +1065,7 @@ export function createStateMachine(initial: Record<State, unknown>) {
 - [ ] 拷贝 LICENSE / 改 `package.json` / `extension.json`（§8）。
 - [ ] 写 `scripts/sync-vendor.mjs`（§7）。
 - [ ] 改 `config/esbuild.common.ts` 加 iframe entry 与 wasm loader（§7.1）。
-- [ ] 改 `locales/extensionJson/{lang}.json` 加 "DWG Importer" / "导入 DWG…" 文案（§3.2 PRD）。
+- [ ] 改 `locales/extensionJson/{lang}.json` 加 "Import DWG" / "导入 DWG…" 文案（§3.2 PRD）。
 - [ ] 改 `extension.json.headerMenus` 三套注册（§3.2 PRD）。
 - [ ] 实现 §12 列出的关键模块骨架。
 - [ ] 跑 `npm run debug` 在 EDA 里走通最小链路。

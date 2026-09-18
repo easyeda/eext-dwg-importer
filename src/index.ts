@@ -21,8 +21,8 @@ export function activate(status?: 'onStartupFinished', arg?: string): void {
 export function about(): void {
 	const eda = edaApi();
 	eda?.sys_Dialog?.showInformationMessage?.(
-		`${eda?.sys_I18n?.text?.('DWG Importer v', undefined, undefined, extensionConfig.version) ?? `DWG Importer v${extensionConfig.version}`}\n${eda?.sys_I18n?.text?.('DWG Importer Description') ?? ''}`,
-		eda?.sys_I18n?.text?.('About DWG Importer') ?? 'About DWG Importer',
+		`${eda?.sys_I18n?.text?.('Import DWG v', undefined, undefined, extensionConfig.version) ?? `Import DWG v${extensionConfig.version}`}\n${eda?.sys_I18n?.text?.('Import DWG Description') ?? ''}`,
+		eda?.sys_I18n?.text?.('About Import DWG') ?? 'About Import DWG',
 	);
 }
 

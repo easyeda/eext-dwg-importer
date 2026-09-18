@@ -1,4 +1,4 @@
-# DWG 导入器（DWG Importer）
+# DWG 导入器（Import DWG）
 
 在嘉立创EDA专业版（EasyEDA Pro）里，直接把 **DWG** 图纸导入到 **PCB / 原理图 / 封装** 编辑器中。
 

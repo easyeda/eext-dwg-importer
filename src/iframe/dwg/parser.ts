@@ -16,6 +16,7 @@ import type { DwgIR, DwgPoint } from '../../shared/types';
 import type { RawDwgEntity } from './ir';
 import { buildBlockDefs, expandInserts } from './block-expander';
 import { buildIR, detectUnits } from './ir';
+import { filterOutlierEntities } from './outlier';
 import { vendorModuleUrl, vendorWasmUrl } from './resources';
 
 export interface ParseOptions {
@@ -24,6 +25,11 @@ export interface ParseOptions {
 	maxEntities?: number;
 	/** 最大文件字节数。 */
 	maxBytes?: number;
+	/**
+	 * 离群实体过滤（默认开启）。极端缩放的辅助几何会把画布视野拉到看不见图元，
+	 * 默认剔除并写解析警告；诊断/对比原始数据时可显式关闭。
+	 */
+	filterOutliers?: boolean;
 }
 
 /** @mlightcad/libredwg-web 的最小结构契约（避免把整个库的类型引入编译单元）。 */
@@ -260,10 +266,21 @@ export async function parseDwg(
 	const expanded = expandInserts(rawEntities, blockDefs);
 	options.onProgress?.(90);
 
+	/*
+	 * 离群过滤：极端缩放的辅助几何（如 xScale 数千倍的块引用）会把整体范围
+	 * 拉到主体 hundreds 倍，导入后 zoomToAllPrimitives 的视野随之爆炸，
+	 * 用户只看到「标尺巨大、什么都看不见」。默认剔除并写警告。
+	 * IR.bbox / 图层计数 / 尺寸行都以过滤后的实体为准。
+	 */
+	const { kept, outliers, threshold } = options.filterOutliers === false
+		? { kept: expanded.entities, outliers: [], threshold: null }
+		: filterOutlierEntities(expanded.entities);
+	const finalEntities = kept;
+
 	// 图层统计
 	const layerEntries = db.tables?.LAYER?.entries ?? [];
 	const counts = new Map<string, number>();
-	for (const e of expanded.entities) {
+	for (const e of finalEntities) {
 		counts.set(e.layer, (counts.get(e.layer) ?? 0) + 1);
 	}
 	const layers = layerEntries.map(l => ({
@@ -282,14 +299,20 @@ export async function parseDwg(
 
 	options.onProgress?.(100);
 
-	// 单位检测的告警（未声明/无法识别的 INSUNITS）并入解析警告。
+	// 单位检测的告警（未声明/无法识别的 INSUNITS）与离群剔除告警并入解析警告。
 	const parseWarnings = [...expanded.warnings];
+	if (outliers.length > 0 && threshold !== null) {
+		parseWarnings.push(
+			`已跳过 ${outliers.length} 个离群实体（距主体超过 ${Math.round(threshold)} 图纸单位，`
+			+ '多为极端缩放的辅助/构造几何）——否则导入后画布视野会被拉到看不见图元',
+		);
+	}
 
 	return buildIR({
 		units: detectUnits(db.header?.INSUNITS, parseWarnings),
 		layers,
 		blocks,
-		entities: expanded.entities,
+		entities: finalEntities,
 		parseWarnings,
 	});
 }

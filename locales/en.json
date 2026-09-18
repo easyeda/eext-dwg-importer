@@ -1,8 +1,8 @@
 {
 	"About": "About",
-	"About DWG Importer": "About DWG Importer",
-	"DWG Importer v": "DWG Importer v{0}",
-	"DWG Importer Description": "This extension uses libredwg wasm to parse DWG files, distributed under GPL-3.0-or-later. Source: https://github.com/easyeda/eext-dwg-importer",
+	"About Import DWG": "About Import DWG",
+	"Import DWG v": "Import DWG v{0}",
+	"Import DWG Description": "This extension uses libredwg wasm to parse DWG files, distributed under GPL-3.0-or-later. Source: https://github.com/easyeda/eext-dwg-importer",
 
 	"Import DWG": "Import DWG",
 

@@ -1,4 +1,4 @@
-# DWG Importer for EasyEDA Pro — 产品需求文档 (PRD)
+# Import DWG for EasyEDA Pro — 产品需求文档 (PRD)
 
 > 版本：v0.2 (评审中，已根据一轮反馈更新)
 > 范围：基于当前 `eext-dwg-importer` 项目，将原本的 `About…` 占位扩展替换为一款真正可在 EasyEDA Pro 中使用的 DWG 导入扩展。
@@ -89,7 +89,7 @@
     "pcb": [
       {
         "id": "dwg-importer.pcb",
-        "title": "DWG Importer",
+        "title": "Import DWG",
         "menuItems": [
           { "id": "dwg-importer.pcb.import", "title": "导入 DWG…", "registerFn": "importDwgPcb" }
         ]
@@ -98,7 +98,7 @@
     "schematic": [
       {
         "id": "dwg-importer.schematic",
-        "title": "DWG Importer",
+        "title": "Import DWG",
         "menuItems": [
           { "id": "dwg-importer.schematic.import", "title": "导入 DWG…", "registerFn": "importDwgSch" }
         ]
@@ -107,7 +107,7 @@
     "footprint": [
       {
         "id": "dwg-importer.footprint",
-        "title": "DWG Importer",
+        "title": "Import DWG",
         "menuItems": [
           { "id": "dwg-importer.footprint.import", "title": "导入 DWG…", "registerFn": "importDwgFootprint" }
         ]
@@ -120,13 +120,13 @@
 补充说明：
 - **不要在 `blank` / `home` / `symbol` / `panel` / `pcbView` 等环境中注册**，确保菜单只在三种目标编辑器出现。
 - **`sch` 字段已弃用**，必须使用 `schematic`。
-- 顶层 `title`（"DWG Importer"）作为一级菜单显示名；菜单项 `title`（"导入 DWG…"）作为二级菜单显示名。两者的多语言均在 `locales/extensionJson/{lang}.json` 中维护：
+- 顶层 `title`（"Import DWG"）作为一级菜单显示名；菜单项 `title`（"导入 DWG…"）作为二级菜单显示名。两者的多语言均在 `locales/extensionJson/{lang}.json` 中维护：
   ```jsonc
   // locales/extensionJson/zh-Hans.json
-  { "DWG Importer": "DWG 导入器", "导入 DWG…": "导入 DWG…" }
+  { "Import DWG": "DWG 导入器", "导入 DWG…": "导入 DWG…" }
 
   // locales/extensionJson/en.json
-  { "DWG Importer": "DWG Importer", "导入 DWG…": "Import DWG…" }
+  { "Import DWG": "Import DWG", "导入 DWG…": "Import DWG…" }
   ```
   入口函数 `importDwgPcb / importDwgSch / importDwgFootprint` 统一在 `src/menu.ts` 内部委托到 `importDwg(documentType)`，**不再在每个函数里重复做环境校验**（EDA 已保证只有目标环境会触发菜单回调）。
 - 不需要 `activate('onStartupFinished')` 中调用 `sys_HeaderMenu.insertHeaderMenus(...)` 运行时切换——静态注册即可，运行时切换会引入复杂性且 BETA 接口 `insertSystemHeaderMenuItem` 有 "需重启才能删除" 的副作用。
@@ -536,7 +536,7 @@ docs/
 
 ### 8.1 功能验收
 
-1. ✅ 仅在 PCB / 原理图 / 封装三种编辑器中，顶部菜单出现 `DWG Importer → 导入 DWG…`；其它环境（Home / Blank / Project / Symbol / Panel / PCB 预览等）**菜单不出现**。
+1. ✅ 仅在 PCB / 原理图 / 封装三种编辑器中，顶部菜单出现 `Import DWG → 导入 DWG…`；其它环境（Home / Blank / Project / Symbol / Panel / PCB 预览等）**菜单不出现**。
 2. ✅ 点击菜单弹出符合 §5 设计要求的现代化弹窗。
 3. ✅ 弹窗可以选 / 拖拽 `.dwg` 文件，文件大小 ≤ 50 MB 解析成功。
 4. ✅ 解析完成后弹出"图层映射"段，自动填充智能建议。

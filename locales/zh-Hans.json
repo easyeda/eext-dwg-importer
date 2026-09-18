@@ -1,8 +1,8 @@
 {
 	"About": "关于",
-	"About DWG Importer": "关于 DWG 导入器",
-	"DWG Importer v": "DWG 导入器 v{0}",
-	"DWG Importer Description": "本扩展使用 libredwg wasm 解析 DWG 文件，并按 GPL-3.0-or-later 协议分发。源码仓库：https://github.com/easyeda/eext-dwg-importer",
+	"About Import DWG": "关于 DWG 导入器",
+	"Import DWG v": "DWG 导入器 v{0}",
+	"Import DWG Description": "本扩展使用 libredwg wasm 解析 DWG 文件，并按 GPL-3.0-or-later 协议分发。源码仓库：https://github.com/easyeda/eext-dwg-importer",
 
 	"Import DWG": "导入 DWG",
 

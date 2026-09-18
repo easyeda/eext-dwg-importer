@@ -1,7 +1,7 @@
 {
 	"name": "dwg-importer",
 	"uuid": "dd5d79bf5dd44287817ae29f79a2e9e4",
-	"displayName": "导入DWG",
+	"displayName": "导入 DWG",
 	"description": "在 PCB / 原理图 / 封装编辑器中直接导入 DWG 文件，支持 BLOCK 展开与图层映射",
 	"version": "1.1.1",
 	"publisher": "EasyEDA",
@@ -31,7 +31,7 @@
 		"pcb": [
 			{
 				"id": "dwg-importer-pcb",
-				"title": "DWG Importer",
+				"title": "Import DWG",
 				"menuItems": [
 					{
 						"id": "dwg-importer-pcb-import",
@@ -44,7 +44,7 @@
 		"sch": [
 			{
 				"id": "dwg-importer-sch",
-				"title": "DWG Importer",
+				"title": "Import DWG",
 				"menuItems": [
 					{
 						"id": "dwg-importer-sch-import",
@@ -57,7 +57,7 @@
 		"footprint": [
 			{
 				"id": "dwg-importer-footprint",
-				"title": "DWG Importer",
+				"title": "Import DWG",
 				"menuItems": [
 					{
 						"id": "dwg-importer-footprint-import",
