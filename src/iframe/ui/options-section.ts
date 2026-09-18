@@ -1,11 +1,13 @@
 /**
- * 选项 section：实体类型开关、默认线宽、单位、原点偏移、跳过空图层。
+ * 选项 section：默认线宽、单位、原点偏移、跳过空图层，底部为实体类型开关。
+ *
+ * 顺序与 index.html 一致：常用项在上，实体类型（很少逐类勾选）固定在卡片底部。
  */
 
 import type { DwgEntityKind, DwgUnit, ImportOptions, OriginOffset } from '../../shared/types';
 import { edaApi } from '../../shared/eda-api';
 import { t } from '../../shared/i18n';
-import { ALL_ENTITY_KINDS } from '../../shared/types';
+import { ALL_ENTITY_KINDS, DEFAULT_OPTIONS } from '../../shared/types';
 import { need } from './dom';
 
 const PRESET_WIDTHS: ReadonlyArray<number> = [1, 2, 4, 6, 8, 10, 20];
@@ -98,11 +100,10 @@ export function createOptionsSection(root: HTMLElement): OptionsSection {
 	}
 
 	const state: ImportOptions & { enabledKinds: Set<DwgEntityKind> } = {
+		// 默认值统一取 DEFAULT_OPTIONS（线宽默认 8mil 等只在那处定义）
+		...DEFAULT_OPTIONS,
 		enabledKinds: new Set(ALL_ENTITY_KINDS),
-		defaultLineWidthMil: 4,
-		units: 'auto',
-		skipEmptyLayers: true,
-		originOffsetMil: { x: 0, y: 0 },
+		originOffsetMil: { ...DEFAULT_OPTIONS.originOffsetMil },
 	};
 
 	rebuildKindGrid(state.enabledKinds);

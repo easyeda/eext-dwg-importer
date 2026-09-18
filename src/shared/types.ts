@@ -56,6 +56,15 @@ export interface DwgLineEntity extends DwgEntityBase {
 	kind: 'LINE';
 	start: DwgPoint;
 	end: DwgPoint;
+	/**
+	 * 无限长构造线（DWG 的 XLINE / RAY）标记。
+	 *
+	 * 这类实体只有「基点 + 单位方向」，没有端点，而 EDA 没有无限长图元。
+	 * 解析时先按 ±1e6 图纸单位生成假端点，使其能正常走 BLOCK 仿射变换，
+	 * 待全部实体就位后按图纸范围裁剪（parser.ts 的 clipInfiniteLines）。
+	 * 裁剪后该字段被清除，**不会出现在最终 IR 里**。
+	 */
+	infinite?: boolean;
 }
 
 export interface DwgCircleEntity extends DwgEntityBase {
@@ -87,6 +96,18 @@ export interface DwgTextEntity extends DwgEntityBase {
 	height: number;
 	/** 弧度。 */
 	rotation: number;
+	/**
+	 * 以下三个字段只用于 MTEXT 折行，**展开后由 parser 的 MTEXT 分行处理消费**，
+	 * 最终 IR 里的文本实体不再带它们（EDA 文本图元是单行的，一行一个实体）。
+	 * 保留在类型上是因为「展开成多行」必须发生在 BLOCK 变换之后（位置才是最终坐标），
+	 * 而变换发生在 RawDwgEntity → DwgEntity 之后，故需要随实体携带到那一步。
+	 */
+	/** MTEXT 参照矩形宽度（图纸单位）；折行用，0/undefined 表示不折行。 */
+	rectWidth?: number;
+	/** MTEXT 附着点（1..9：1..3 上、4..6 中、7..9 下）。 */
+	attachmentPoint?: number;
+	/** MTEXT 行距系数（1 = 单倍）。 */
+	lineSpacing?: number;
 }
 
 export type DwgEntity
@@ -165,7 +186,11 @@ export interface ImportOptions {
 
 export const DEFAULT_OPTIONS: ImportOptions = {
 	enabledKinds: new Set(ALL_ENTITY_KINDS),
-	defaultLineWidthMil: 4,
+	/*
+	 * 默认线宽 8 mil（用户反馈：4 mil 在画布上过细，DWG 线条看不清）。
+	 * 这是所有默认值的唯一来源——storage 的兜底与选项面板初值都引用它。
+	 */
+	defaultLineWidthMil: 8,
 	units: 'auto',
 	skipEmptyLayers: true,
 	originOffsetMil: { x: 0, y: 0 },

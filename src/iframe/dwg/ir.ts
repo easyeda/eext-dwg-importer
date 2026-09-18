@@ -36,6 +36,12 @@ export interface RawDwgEntity {
 	sx?: number;
 	sy?: number;
 	mirror?: boolean;
+	/** XLINE / RAY：已生成假端点，标记为「待按图纸范围裁剪的无限长线」。 */
+	infinite?: boolean;
+	/** MTEXT 折行参数（见 shared/types.ts 的同名字段说明）。 */
+	rectWidth?: number;
+	attachmentPoint?: number;
+	lineSpacing?: number;
 }
 
 let counter = 0;
@@ -54,7 +60,14 @@ export function rawToEntity(raw: RawDwgEntity): DwgEntity {
 	};
 	switch (raw.kind) {
 		case 'LINE':
-			return { ...base, kind: 'LINE', start: raw.start ?? { x: 0, y: 0 }, end: raw.end ?? { x: 0, y: 0 } };
+			return {
+				...base,
+				kind: 'LINE',
+				start: raw.start ?? { x: 0, y: 0 },
+				end: raw.end ?? { x: 0, y: 0 },
+				// 仅 XLINE/RAY 会带此标记；普通线为 undefined（不写入对象）。
+				...(raw.infinite ? { infinite: true } : {}),
+			};
 		case 'LWPOLYLINE':
 		case 'POLYLINE':
 		case 'SPLINE':
@@ -84,6 +97,13 @@ export function rawToEntity(raw: RawDwgEntity): DwgEntity {
 				content: raw.content ?? '',
 				height: raw.height ?? 1,
 				rotation: raw.rotation ?? 0,
+				...(raw.kind === 'MTEXT'
+					? {
+							rectWidth: raw.rectWidth,
+							attachmentPoint: raw.attachmentPoint,
+							lineSpacing: raw.lineSpacing,
+						}
+					: {}),
 			};
 		default:
 			throw new Error(`Unsupported raw entity kind: ${raw.kind}`);

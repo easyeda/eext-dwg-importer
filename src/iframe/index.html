@@ -82,8 +82,6 @@
 
 					<section data-role="options-section" class="card card-grow">
 						<div data-role="title" class="card-title"></div>
-						<div data-role="kind-label" class="sub-label"></div>
-						<div data-role="kind-grid" class="kind-grid"></div>
 						<div class="options-row">
 							<span data-role="width-label"></span>
 							<select data-role="width-select"></select>
@@ -94,9 +92,21 @@
 						</div>
 						<div data-role="offset-label" class="sub-label"></div>
 						<div class="options-row offset-row">
-							<input data-role="offset-x" class="num-input" type="number" step="any" />
-							<span class="offset-comma">,&#8202;</span>
-							<input data-role="offset-y" class="num-input" type="number" step="any" />
+							<!--
+								X/Y 轴名直接写在 HTML：与表头 DWG、此前的逗号分隔符同类，
+								属通用符号（中英文一致），无需进语言包。
+								原来只有逗号分隔，两个数字框分不清哪个是 X 哪个是 Y。
+								每组用 label 包住：组内间隙 6px（.options-row label 规则），
+								与组间 8px 拉开对比，轴名归属一目了然；点轴名即可聚焦输入框。
+							-->
+							<label class="axis-field">
+								<span class="axis-label">X</span>
+								<input data-role="offset-x" class="num-input" type="number" step="any" />
+							</label>
+							<label class="axis-field">
+								<span class="axis-label">Y</span>
+								<input data-role="offset-y" class="num-input" type="number" step="any" />
+							</label>
 							<button data-role="pick-origin" class="icon-btn" type="button"></button>
 						</div>
 						<div class="options-row">
@@ -111,6 +121,12 @@
 								<span data-role="merge-collinear-label"></span>
 							</label>
 						</div>
+						<!--
+							实体类型开关放在选项卡片底部（CSS margin-top:auto 推到底边）：
+							日常导入很少逐类勾选，放底部不挡常用项（线宽/单位/原点偏移）。
+						-->
+						<div data-role="kind-label" class="sub-label"></div>
+						<div data-role="kind-grid" class="kind-grid"></div>
 					</section>
 				</div>
 			</main>

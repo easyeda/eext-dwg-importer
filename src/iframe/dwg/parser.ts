@@ -12,12 +12,16 @@
  * 失败统一抛 Error，message 含上下文，由调用方在界面上呈现。
  */
 
-import type { DwgIR, DwgPoint } from '../../shared/types';
+import type { DwgEntity, DwgIR, DwgPoint } from '../../shared/types';
 import type { RawDwgEntity } from './ir';
 import { buildBlockDefs, expandInserts } from './block-expander';
-import { buildIR, detectUnits } from './ir';
+import { expandBulgeVertices } from './bulge';
+import { clipLineToBox, infiniteLineEndpoints } from './infinite-line';
+import { buildIR, computeBoundingBox, detectUnits } from './ir';
+import { mtextFirstLineOffsetY, mtextLinePitch, splitMTextLines } from './mtext';
 import { filterOutlierEntities } from './outlier';
 import { vendorModuleUrl, vendorWasmUrl } from './resources';
+import { sampleSplineCurve } from './spline-fit';
 
 export interface ParseOptions {
 	onProgress?: (percent: number) => void;
@@ -50,8 +54,8 @@ interface DwgEntityLike {
 	radius?: number;
 	startAngle?: number;
 	endAngle?: number;
-	// LWPOLYLINE
-	vertices?: Array<{ x: number; y: number }>;
+	// LWPOLYLINE / POLYLINE2D / POLYLINE3D（顶点可带凸度 bulge = tan(θ/4)）
+	vertices?: Array<{ x: number; y: number; bulge?: number }>;
 	flag?: number;
 	constantWidth?: number;
 	// POLYLINE2D/3D
@@ -66,6 +70,29 @@ interface DwgEntityLike {
 	controlPoints?: Point3D[];
 	fitPoints?: Point3D[];
 	degree?: number;
+	/** SPLINE 节点向量；控制点型样条求值必需（缺了只能退化成拟合点连线）。 */
+	knots?: number[];
+	/** SPLINE 有理权重（与 controlPoints 等长）。 */
+	weights?: number[];
+	/** SPLINE 端点切向（拟合点型样条的端导数）。 */
+	startTangent?: Point3D;
+	endTangent?: Point3D;
+	// XLINE / RAY（无限长构造线）
+	firstPoint?: Point3D;
+	unitDirection?: Point3D;
+	// WIPEOUT（遮罩）：位置 + 两个像素向量 + 归一化裁剪边界
+	position?: Point3D;
+	uPixel?: Point3D;
+	vPixel?: Point3D;
+	imageSize?: { x: number; y: number };
+	clippingBoundaryPath?: Array<{ x: number; y: number }>;
+	countBoundaryPoints?: number;
+	// MTEXT 折行参数
+	rectWidth?: number;
+	attachmentPoint?: number;
+	lineSpacing?: number;
+	// ACAD_TABLE：匿名块名可能缺失，靠 blockRecordHandle 或 *T<n> 命名约定兜底
+	blockRecordHandle?: string;
 	// INSERT
 	name?: string;
 	xScale?: number;
@@ -238,6 +265,22 @@ export async function parseDwg(
 	 * - 空块没有展开价值。
 	 */
 	const blockEntries = db.tables?.BLOCK_RECORD?.entries ?? [];
+
+	/*
+	 * 转换上下文（见 ToRawContext 注释）。
+	 * `tableBlocks` 单独预扫一遍：表格可能出现在模型空间（正常情况）也可能在块里，
+	 * 预扫后与遍历顺序无关，且只收「真正会进入 blockDefs 的块」（非布局、非 XREF、非空）。
+	 */
+	const ctx: ToRawContext = { tableBlocks: [], skipped: new Map<string, number>() };
+	for (const b of blockEntries) {
+		const isLayout = /^\*(?:Model|Paper)_Space/i.test(b.name);
+		const isXref = typeof b.flags === 'number' && (b.flags & 4) !== 0;
+		if (isLayout || isXref || (b.entities ?? []).length === 0)
+			continue;
+		if (/^\*T\d+$/i.test(b.name))
+			ctx.tableBlocks.push(b.name);
+	}
+
 	const blockDefsRaw: Array<{ name: string; entities: RawDwgEntity[] }> = [];
 	for (const b of blockEntries) {
 		const isLayout = /^\*(?:Model|Paper)_Space/i.test(b.name);
@@ -247,7 +290,7 @@ export async function parseDwg(
 			continue;
 		const converted: RawDwgEntity[] = [];
 		for (const e of entityList) {
-			const r = toRaw(e);
+			const r = toRaw(e, ctx);
 			if (r)
 				converted.push(r);
 		}
@@ -257,13 +300,25 @@ export async function parseDwg(
 	// 模型空间实体 → RawDwgEntity（含 INSERT）
 	const rawEntities: RawDwgEntity[] = [];
 	for (const e of modelEntities) {
-		const r = toRaw(e);
+		const r = toRaw(e, ctx);
 		if (r)
 			rawEntities.push(r);
 	}
 
 	const blockDefs = buildBlockDefs(blockDefsRaw);
 	const expanded = expandInserts(rawEntities, blockDefs);
+
+	/*
+	 * 构造线裁剪：XLINE/RAY 带的是「基点 + 方向」（长度无限），
+	 * 展开拿到最终坐标后裁到图纸实际范围；不裁就会横贯画布并撑爆视野。
+	 */
+	const lineClip = clipInfiniteEntities(expanded.entities);
+
+	/*
+	 * MTEXT 分行：EDA 文本图元是单行的，多行文本必须拆成多个文本实体，
+	 * 否则整串（含 `\P`）挤在一行里——用户反馈的「多行文本没有准确换行显示」。
+	 */
+	const textExpanded = expandMultiLineText(lineClip.entities);
 	options.onProgress?.(90);
 
 	/*
@@ -273,8 +328,8 @@ export async function parseDwg(
 	 * IR.bbox / 图层计数 / 尺寸行都以过滤后的实体为准。
 	 */
 	const { kept, outliers, threshold } = options.filterOutliers === false
-		? { kept: expanded.entities, outliers: [], threshold: null }
-		: filterOutlierEntities(expanded.entities);
+		? { kept: textExpanded, outliers: [], threshold: null }
+		: filterOutlierEntities(textExpanded);
 	const finalEntities = kept;
 
 	// 图层统计
@@ -300,7 +355,10 @@ export async function parseDwg(
 	options.onProgress?.(100);
 
 	// 单位检测的告警（未声明/无法识别的 INSUNITS）与离群剔除告警并入解析警告。
-	const parseWarnings = [...expanded.warnings];
+	const parseWarnings = [...expanded.warnings, ...lineClip.warnings];
+	const skippedWarning = describeSkippedEntities(ctx.skipped);
+	if (skippedWarning)
+		parseWarnings.push(skippedWarning);
 	if (outliers.length > 0 && threshold !== null) {
 		parseWarnings.push(
 			`已跳过 ${outliers.length} 个离群实体（距主体超过 ${Math.round(threshold)} 图纸单位，`
@@ -317,8 +375,22 @@ export async function parseDwg(
 	});
 }
 
+/**
+ * 实体转换上下文：把「转换单个实体」需要的全局信息集中传递。
+ *
+ * - `tableBlocks`：表格匿名块（`*T<n>`）候选队列。DWG 里表格的可见几何存放在
+ *   匿名块中，而解析库给出的 ACAD_TABLE 实体 **blockRecordHandle 为空、name 未定义**
+ *   （实测 case/example_2018.dwg），只剩「命名约定」这一条线索，故按出现顺序认领。
+ * - `skipped`：未导入的类型计数。以前 `default: return null` 是**静默丢弃**，
+ *   用户只看到「图元少了」，不知道少了什么、为什么少（表格/面域/遮罩就是这种情况）。
+ */
+interface ToRawContext {
+	tableBlocks: string[];
+	skipped: Map<string, number>;
+}
+
 /** 把 libredwg-web 的实体对象转换成 RawDwgEntity；不支持的类型返回 null。 */
-function toRaw(e: DwgEntityLike): RawDwgEntity | null {
+function toRaw(e: DwgEntityLike, ctx: ToRawContext): RawDwgEntity | null {
 	const layer = e.layer ?? '0';
 	const common = {
 		id: e.handle,
@@ -351,29 +423,61 @@ function toRaw(e: DwgEntityLike): RawDwgEntity | null {
 				startAngle: e.startAngle ?? 0,
 				endAngle: e.endAngle ?? 0,
 			};
-		case 'LWPOLYLINE':
+		case 'LWPOLYLINE': {
+			// 闭合位是 512（不是 bit0），实测依据见 isLwPolylineClosed 注释。
+			const closed = isLwPolylineClosed(e.flag);
 			return {
 				...common,
 				kind: 'LWPOLYLINE',
-				points: (e.vertices ?? []).map(v => ({ x: v.x, y: v.y }) as DwgPoint),
-				closed: isPolylineClosed(e.flag),
+				points: expandBulgeVertices(e.vertices ?? [], closed),
+				closed,
 			};
+		}
 		case 'POLYLINE2D':
-		case 'POLYLINE3D':
+		case 'POLYLINE3D': {
+			// 旧式 POLYLINE 的 flag 与 DXF group 70 同构，闭合位是 bit0（与 LWPOLYLINE 不同）。
+			const closed = isPolylineClosed(e.flag);
 			return {
 				...common,
 				kind: 'POLYLINE',
-				points: (e.vertices ?? []).map(v => ({ x: v.x, y: v.y }) as DwgPoint),
-				closed: isPolylineClosed(e.flag),
+				points: expandBulgeVertices(e.vertices ?? [], closed),
+				closed,
 			};
+		}
 		case 'SPLINE': {
-			const pts = (e.fitPoints?.length ? e.fitPoints : e.controlPoints) ?? [];
-			return {
-				...common,
-				kind: 'SPLINE',
-				points: pts.map(p => toPoint2D(p)),
-				closed: false,
-			};
+			/*
+			 * 贝塞尔 / B 样条必须**真正求值**再采样成折线。
+			 *
+			 * 此前是把控制点（或拟合点）直接当成折线顶点——等价于把「控制多边形」
+			 * 画出来，曲线段全变成直弦（用户反馈即「贝塞尔曲线需要转多段线拟合」）。
+			 * 实测 case/example_2018.dwg：4 条 SPLINE 中拟合点型（knots/controlPoints
+			 * 为空、fitPoints 6 个）必须做插值拟合，控制点型则用 de Boor 求值。
+			 */
+			const splineClosed = typeof e.flag === 'number' && (e.flag & 1) !== 0;
+			const sampled = sampleSplineCurve({
+				degree: e.degree,
+				knots: e.knots,
+				controlPoints: (e.controlPoints ?? []).map(p => toPoint2D(p)),
+				weights: e.weights,
+				fitPoints: (e.fitPoints ?? []).map(p => toPoint2D(p)),
+				startTangent: e.startTangent ? toPoint2D(e.startTangent) : undefined,
+				endTangent: e.endTangent ? toPoint2D(e.endTangent) : undefined,
+				closed: splineClosed,
+			});
+			if (sampled.length >= 2)
+				return { ...common, kind: 'SPLINE', points: sampled, closed: splineClosed };
+
+			/*
+			 * 求值失败（数据不足/退化）时退回原始点串：几何位置仍是对的，
+			 * 只是弯段变直——比整条曲线消失好，且计数让用户在警告里看到。
+			 */
+			const fallback = e.fitPoints?.length ? e.fitPoints : e.controlPoints;
+			if (!fallback || fallback.length < 2) {
+				bumpSkipped(ctx, 'SPLINE(数据不足)');
+				return null;
+			}
+			bumpSkipped(ctx, 'SPLINE(退化为折线)');
+			return { ...common, kind: 'SPLINE', points: fallback.map(p => toPoint2D(p)), closed: splineClosed };
 		}
 		case 'TEXT':
 			return {
@@ -392,6 +496,10 @@ function toRaw(e: DwgEntityLike): RawDwgEntity | null {
 				content: typeof e.text === 'string' ? e.text : '',
 				height: e.textHeight ?? 1,
 				rotation: e.rotation ?? 0,
+				// 折行参数随实体带到 BLOCK 变换之后，再由 expandMultiLineText 消费。
+				rectWidth: e.rectWidth,
+				attachmentPoint: e.attachmentPoint,
+				lineSpacing: e.lineSpacing,
 			};
 		case 'SOLID': {
 			/*
@@ -435,8 +543,10 @@ function toRaw(e: DwgEntityLike): RawDwgEntity | null {
 			 * v1.2.0 前整个 DIMENSION 被跳过，R13 等图纸导入后标注全部消失，
 			 * 与 CAD 显示「相差太远」。
 			 */
-			if (!e.name)
+			if (!e.name) {
+				bumpSkipped(ctx, 'DIMENSION(无匿名块)');
 				return null;
+			}
 			return {
 				...common,
 				kind: 'INSERT',
@@ -460,12 +570,96 @@ function toRaw(e: DwgEntityLike): RawDwgEntity | null {
 				rotation: e.rotation ?? 0,
 				mirror: false,
 			};
+		case 'XLINE':
+		case 'RAY': {
+			/*
+			 * 无限长构造线：数据里只有基点 + 单位方向（长度无限），
+			 * 先按一个很大的假长度生成端点，展开后再统一裁到图纸实际范围
+			 * （见 clipInfiniteEntities）——不裁的话导入后就是一条横贯画布、
+			 * 把 zoomToAllPrimitives 视野彻底拉爆的直线。
+			 *
+			 * 用户反馈的「斜线有未导入的」即这两类（实测 case/example_2018.dwg
+			 * 各 1 条，方向 (0.4475, -0.8943) / (0.8208, 0.5712)，确实是斜的）。
+			 */
+			const seg = infiniteLineEndpoints(toPoint2D(e.firstPoint), toPoint2D(e.unitDirection));
+			if (!seg) {
+				bumpSkipped(ctx, `${e.type}(方向无效)`);
+				return null;
+			}
+			return { ...common, kind: 'LINE', start: seg.start, end: seg.end, infinite: true };
+		}
+		case 'WIPEOUT': {
+			/*
+			 * 遮罩（WIPEOUT）：EDA 没有「遮罩/蒙版」图元，导入为闭合轮廓，
+			 * 至少把可见边界保留下来（此前整类被丢弃 → 用户反馈「AcDbWipeout(1) 没有导入」）。
+			 */
+			const pts = wipeoutBoundaryPoints(e);
+			if (pts.length < 3) {
+				bumpSkipped(ctx, 'WIPEOUT(无有效边界)');
+				return null;
+			}
+			return { ...common, kind: 'LWPOLYLINE', points: pts, closed: true };
+		}
+		case 'ACAD_TABLE': {
+			/*
+			 * 表格：可见几何全在匿名块里——与 DIMENSION 同一套路（实测
+			 * case/example_2018.dwg：ACAD_TABLE 落在 `*T13`，块内 32 条 LINE + 7 个 MTEXT，
+			 * 且 startPoint=(0,0,0)，即块内几何已是表格局部坐标，用恒等 INSERT 即可）。
+			 *
+			 * 难点：解析库给出的 ACAD_TABLE **name 为空、blockRecordHandle 也是空串、
+			 * rowCount=0 / cells 为空**，唯一线索是 AutoCAD 的 `*T<n>` 命名约定，
+			 * 故按出现顺序从候选队列里认领（见 ToRawContext）。认不到就跳过并计入警告，
+			 * 不再像以前那样静默消失。
+			 */
+			const blockName = resolveTableBlock(e, ctx);
+			if (!blockName) {
+				bumpSkipped(ctx, 'ACAD_TABLE(未找到匿名块)');
+				return null;
+			}
+			return {
+				...common,
+				kind: 'INSERT',
+				blockName,
+				tx: e.startPoint?.x ?? 0,
+				ty: e.startPoint?.y ?? 0,
+				sx: 1,
+				sy: 1,
+				rotation: 0,
+				mirror: false,
+			};
+		}
 		default:
-			// ATTDEF / DIMENSION / HATCH / ELLIPSE / 3DFACE 等在 v1 中跳过。
+			/*
+			 * 未支持的类型：**计数**而非静默丢弃。
+			 * 面域（REGION）/三维实体（3DSOLID）在解析库里只有 ACIS 数据（satCache），
+			 * 没有可用的二维几何，只能不导入——但必须让用户知道少了什么（汇总成解析警告）。
+			 */
+			bumpSkipped(ctx, e.type);
 			return null;
 	}
 }
 
+/**
+ * LWPOLYLINE 的闭合标志位是 **512（0x200）**，不是 bit0。
+ *
+ * 实测依据（case/example_2000.dwg，用 libredwg 自身的 DXF 写出器取真值）：
+ *   按 handle 逐条对照「解析库 flag」与「DXF group 70」——
+ *     flag=0   → 70=0（开放）
+ *     flag=512 → 70=1（闭合）
+ *     flag=528 → 70=1（闭合，528 = 512 + 16）
+ *   上游 libredwg-web 的渲染路径也是这么判的（`const closed = !!(lwpolyline.flag & 512)`）。
+ *
+ * 此前按 bit0 判定，导致上述 512/528 的多段线被当成开放导入：
+ * 每个轮廓都少了最后一段闭合线，用户看到的就是「丢线段、不闭合」。
+ */
+function isLwPolylineClosed(flag: number | undefined): boolean {
+	return typeof flag === 'number' && (flag & 512) !== 0;
+}
+
+/**
+ * 旧式 POLYLINE2D/POLYLINE3D 的 flag 与 DXF group 70 同构，闭合位是 bit0。
+ * 实测：handle 41A 的 POLYLINE3D 库 flag=1、DXF 70=9（1 闭合 + 8 三维多段线）。
+ */
 function isPolylineClosed(flag: number | undefined): boolean {
 	return typeof flag === 'number' && (flag & 1) !== 0;
 }
@@ -514,4 +708,171 @@ function sampleEllipse(
 
 function toPoint2D(p: Point3D | undefined): DwgPoint {
 	return { x: p?.x ?? 0, y: p?.y ?? 0 };
+}
+
+/** 未导入类型计数 +1（key 可直接用实体类型名，或带一句原因）。 */
+function bumpSkipped(ctx: ToRawContext, key: string): void {
+	ctx.skipped.set(key, (ctx.skipped.get(key) ?? 0) + 1);
+}
+
+/**
+ * 把「未导入类型」计数汇总成一条用户可见的解析警告。
+ *
+ * 为什么要有：以前 `default: return null` 是静默丢弃，用户导入后只看到
+ * 「图元比 CAD 少」，既不知道少了什么、也不知道为什么（面域/三维实体就是
+ * 「库里只有 ACIS 数据、拿不到二维几何」这一条硬限制）。
+ */
+function describeSkippedEntities(skipped: ReadonlyMap<string, number>): string | null {
+	if (skipped.size === 0)
+		return null;
+	const parts = [...skipped.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.map(([key, count]) => `${key} × ${count}`);
+	return `以下 ${parts.length} 类实体未导入（解析库未提供可用的二维几何，或本扩展暂不支持）：${parts.join('、')}`;
+}
+
+/**
+ * WIPEOUT 的边界点 → 世界坐标闭合轮廓。
+ *
+ * 数据形状（实测 case/example_2018.dwg，2 个 WIPEOUT）：
+ *   `position` 左上角基点 + `uPixel`/`vPixel`（**整幅图**的两个方向向量）
+ *   + `imageSize`（像素数，实测 (1,1)）+ `clippingBoundaryPath`（**归一化**坐标 0..1）。
+ * 故世界坐标 = position + uPixel·(nx · imageSize.x) + vPixel·(ny · imageSize.y)。
+ * imageSize 缺省按 1 处理（此时归一化坐标直接被 uPixel/vPixel 缩放）。
+ */
+function wipeoutBoundaryPoints(e: DwgEntityLike): DwgPoint[] {
+	const path = e.clippingBoundaryPath ?? [];
+	const pos = e.position;
+	if (!pos || path.length < 3)
+		return [];
+	const u = e.uPixel ?? { x: 1, y: 0 };
+	const v = e.vPixel ?? { x: 0, y: 1 };
+	const sx = e.imageSize?.x ?? 1;
+	const sy = e.imageSize?.y ?? 1;
+	// uPixel/vPixel 可能已被解析库缩放成单位向量，长度过小时按 imageSize 反推
+	const out: DwgPoint[] = [];
+	for (const p of path) {
+		if (!Number.isFinite(p.x) || !Number.isFinite(p.y))
+			continue;
+		out.push({
+			x: pos.x + u.x * p.x * sx + v.x * p.y * sy,
+			y: pos.y + u.y * p.x * sx + v.y * p.y * sy,
+		});
+	}
+	return out;
+}
+
+/**
+ * 表格（ACAD_TABLE）→ 匿名块名。
+ *
+ * 优先用实体自带的 name / blockRecordHandle；两者都为空时（实测就是这种）
+ * 从 `*T<n>` 候选队列里按出现顺序认领一个（AutoCAD 给每个表格建一个 `*T<n>` 块，
+ * 顺序与表格出现顺序一致）。队列空则返回 null（调用方计入未导入警告）。
+ */
+function resolveTableBlock(e: DwgEntityLike, ctx: ToRawContext): string | null {
+	if (typeof e.name === 'string' && e.name.length > 0)
+		return e.name;
+	if (typeof e.blockRecordHandle === 'string' && e.blockRecordHandle.length > 0) {
+		// 句柄不是块名：仅在恰好存在同名候选时采用，否则退回命名约定
+		const hit = ctx.tableBlocks.find(n => n === e.blockRecordHandle);
+		if (hit)
+			return hit;
+	}
+	return ctx.tableBlocks.shift() ?? null;
+}
+
+/**
+ * 裁剪无限长构造线（XLINE / RAY）。
+ *
+ * 范围取**其他有限实体**的包围盒（不含构造线自身，否则假端点会把范围撑爆），
+ * 四周留 2% 边距后按 Liang-Barsky 求交；完全落在范围外的直接丢弃并计数。
+ * 裁剪后清掉 `infinite` 标记，IR 与后续写入流程看到的都是普通 LINE。
+ */
+function clipInfiniteEntities(entities: ReadonlyArray<DwgEntity>): { entities: DwgEntity[]; warnings: string[] } {
+	const hasInfinite = entities.some(e => e.kind === 'LINE' && e.infinite);
+	if (!hasInfinite)
+		return { entities: [...entities], warnings: [] };
+
+	const finite = entities.filter(e => !(e.kind === 'LINE' && e.infinite));
+	const box = computeBoundingBox(finite);
+	if (!box) {
+		// 整张图只有构造线：没有可参照的范围，全部丢弃（否则必然横贯画布）
+		const dropped = entities.length - finite.length;
+		return {
+			entities: finite,
+			warnings: [`已跳过 ${dropped} 条无限长构造线（图中没有其他实体可确定图纸范围）`],
+		};
+	}
+
+	const out: DwgEntity[] = [];
+	let dropped = 0;
+	for (const e of entities) {
+		if (!(e.kind === 'LINE' && e.infinite)) {
+			out.push(e);
+			continue;
+		}
+		const seg = clipLineToBox(e.start, e.end, box);
+		if (!seg) {
+			dropped++;
+			continue;
+		}
+		// 去掉 transient 标记，IR 里就是普通线段
+		const { infinite: _drop, ...rest } = e;
+		out.push({ ...rest, start: seg.start, end: seg.end });
+	}
+	const warnings: string[] = [];
+	if (dropped > 0)
+		warnings.push(`已跳过 ${dropped} 条完全落在图纸范围外的无限长构造线（XLINE/RAY）`);
+	return { entities: out, warnings };
+}
+
+/**
+ * MTEXT 展开成多行文本实体。
+ *
+ * EDA 的文本图元（`pcb_PrimitiveString`）一次只能画一行，故 MTEXT 必须拆开：
+ *   1. 按 `\P`（硬换行）+ 参照矩形宽度折行拆成 N 行（见 dwg/mtext.ts）；
+ *   2. 每行一个文本实体，从首行位置起按行距（5/3 × 字高）向下排；
+ *   3. 首行位置按 attachmentPoint（上/中/下）从插入点反推。
+ *
+ * 拆行必须在 BLOCK 变换**之后**做——只有那时 position 才是最终坐标。
+ * 只有一行（且不含格式码）的 MTEXT 原样保留，避免无谓地改变实体数量。
+ */
+function expandMultiLineText(entities: ReadonlyArray<DwgEntity>): DwgEntity[] {
+	const out: DwgEntity[] = [];
+	for (const e of entities) {
+		if (e.kind !== 'MTEXT') {
+			out.push(e);
+			continue;
+		}
+		const lines = splitMTextLines(e.content, e.height, e.rectWidth);
+		if (lines.length <= 1 && (lines[0] ?? '') === e.content) {
+			out.push(e);
+			continue;
+		}
+		if (lines.length === 0) {
+			// 内容全是格式码（清理后为空）：不产出空文本图元
+			continue;
+		}
+		const pitch = mtextLinePitch(e.height, e.lineSpacing);
+		const offsetY = mtextFirstLineOffsetY(e.attachmentPoint ?? 1, lines.length, pitch);
+		// 文本行沿 MTEXT 自身的旋转方向排列（旋转文本的行方向随之旋转）
+		const cos = Math.cos(e.rotation);
+		const sin = Math.sin(e.rotation);
+		for (let i = 0; i < lines.length; i++) {
+			const dy = offsetY - i * pitch;
+			out.push({
+				...e,
+				content: lines[i]!,
+				position: {
+					x: e.position.x - dy * sin,
+					y: e.position.y + dy * cos,
+				},
+				// 行已拆开：折行参数不再向下传递（IR 里不保留 transient 字段）
+				rectWidth: undefined,
+				attachmentPoint: undefined,
+				lineSpacing: undefined,
+			});
+		}
+	}
+	return out;
 }

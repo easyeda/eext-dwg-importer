@@ -11,10 +11,16 @@
 
 import type { DwgUnit } from '../shared/types';
 import { edaApi } from '../shared/eda-api';
+import { DEFAULT_OPTIONS } from '../shared/types';
 
 const NS = 'dwg-importer.';
 const KEY_LAST_DIR = `${NS}lastDir`;
-const KEY_LINE_WIDTH = `${NS}defaultLineWidthMil`;
+/*
+ * 线宽 key 带版本号（v2）：默认线宽从 4mil 改为 8mil 后（用户反馈线条过细），
+ * 老 key 里存着历史默认值 4——若沿用同一 key，该改动对老用户完全不可见。
+ * 提高版本 = 一次性作废旧默认值；用户之后手动选定的线宽（写在新 key）照常保留。
+ */
+const KEY_LINE_WIDTH = `${NS}defaultLineWidthMil2`;
 const KEY_UNIT = `${NS}defaultUnit`;
 /** host 在打开 iframe 前写入的启动参数（openIFrame 不支持 query 参数）。 */
 export const KEY_LAUNCH = `${NS}launch`;
@@ -61,9 +67,9 @@ export function createIframeStorage(): IframeStorage {
 		getDefaultLineWidth() {
 			const v = readString(KEY_LINE_WIDTH);
 			if (!v)
-				return 4;
+				return DEFAULT_OPTIONS.defaultLineWidthMil;
 			const n = Number.parseInt(v, 10);
-			return Number.isFinite(n) && n > 0 ? n : 4;
+			return Number.isFinite(n) && n > 0 ? n : DEFAULT_OPTIONS.defaultLineWidthMil;
 		},
 		async setDefaultLineWidth(mil) {
 			await writeValue(KEY_LINE_WIDTH, String(Math.max(1, Math.floor(mil))));

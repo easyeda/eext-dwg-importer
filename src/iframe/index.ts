@@ -184,7 +184,15 @@ function start(): void {
 			sm.transition('parsed');
 		}
 		catch (err) {
-			fileSec.setStatusError((err as Error).message);
+			/*
+			 * 状态条是固定高度的单行省略，长原因会被截断，
+			 * 故解析失败同时写日志 + toast（与导入失败的兜底一致），
+			 * 避免用户只能看到半句原因。
+			 */
+			const message = t('Status: parse failed: {0}', (err as Error).message);
+			fileSec.setStatusError(message);
+			edaApi()?.sys_Log?.error?.('[DwgImporter] 解析失败:', (err as Error).message);
+			edaApi()?.sys_Message?.showToastMessage?.(message);
 			sm.transition('error');
 		}
 	});

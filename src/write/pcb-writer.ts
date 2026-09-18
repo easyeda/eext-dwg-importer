@@ -40,6 +40,7 @@ import type {
 	DwgUnit,
 	LayerMapping,
 } from '../shared/types';
+import { arcSegmentsForSweep } from '../shared/curve';
 import { edaApi, isPcbSignalLayer } from '../shared/eda-api';
 import { dwgToMil, radToDeg } from '../shared/units';
 import { countCreated, pushError } from './apply-result';
@@ -54,6 +55,10 @@ const BATCH = 50;
 const STRING_ALIGN_LEFT_BOTTOM = 3;
 /** EPCB_PrimitiveArcInteractiveMode.TWO_POINT_ARC：两端点 + 圆弧角模式。 */
 const ARC_MODE_TWO_POINT = 1;
+/** 图形层圆弧采成折线时的矢高 / 弦长 相对误差上限（与多段线凸度采样同一口径）。 */
+const ARC_TOL_RATIO = 0.02;
+/** 单个圆弧的最大采样段数（半圆约需 20 段，64 段足够覆盖整圆）。 */
+const MAX_ARC_SEGMENTS = 64;
 /** 官方示例使用的默认字体名。 */
 const DEFAULT_FONT = 'default';
 
@@ -226,14 +231,43 @@ async function writeOne(
 
 			case 'ARC': {
 				// EDA 的 ARC 需要两端点 + 圆弧角，故先由圆心/半径/起止角算出两端点。
+				const sweepRad = normalizeSweepRad(e.endAngle - e.startAngle);
+				/*
+				 * 起止角相同的弧在任何查看器里都不可见，却会创建零尺寸幽灵图元
+				 * （与零长度线段/零半径圆同类问题），直接跳过。
+				 */
+				if (!(Math.abs(sweepRad) > 1e-9)) {
+					eda.sys_Log?.info?.('[DwgImporter] 跳过零扫掠圆弧', e.layer);
+					break;
+				}
+				/*
+				 * 图形层的圆弧改用**折线**表达（与圆同理，圆本来就采成折线）。
+				 *
+				 * 实测（用户反馈）：pcb_PrimitiveArc（ArcTrack）省略 net 后能在图形层
+				 * 创建、也能正常显示，但导入后**无法被选中/拾取**；而同层的折线
+				 * （直线与圆都已改折线）选择正常。为保持一致且可拾取，图形层的弧按
+				 * 矢高容差采样成开放折线。信号层仍用原生 ArcTrack（电气图元）。
+				 */
+				if (!isPcbSignalLayer(targetLayer)) {
+					const segments = arcSegmentsForSweep(sweepRad, ARC_TOL_RATIO, MAX_ARC_SEGMENTS, 2);
+					const arcPoly = mkPolygon(arcPoints(e.center, e.radius, e.startAngle, sweepRad, segments), false);
+					if (!arcPoly) {
+						result.failedCount += 1;
+						pushError(result, e, '圆弧采样点数不足，无法构造折线');
+						break;
+					}
+					const polygon = eda.pcb_MathPolygon?.createPolygon?.(arcPoly);
+					if (!polygon) {
+						result.failedCount += 1;
+						pushError(result, e, '圆弧折线源数据被 EDA 判为不合法（createPolygon 返回 undefined）');
+						break;
+					}
+					const created = await eda.pcb_PrimitivePolyline?.create?.(NET, targetLayer, polygon, ctx.width, false);
+					countCreated(result, e, created);
+					break;
+				}
 				const p1 = pointOnCircle(e.center, e.radius, e.startAngle);
-				const p2 = pointOnCircle(e.center, e.radius, e.endAngle);
-				let sweepDeg = radToDeg(e.endAngle - e.startAngle);
-				// 归一化到 (-360, 360)，负值表示顺时针。
-				while (sweepDeg > 360)
-					sweepDeg -= 360;
-				while (sweepDeg < -360)
-					sweepDeg += 360;
+				const p2 = pointOnCircle(e.center, e.radius, e.startAngle + sweepRad);
 				const created = await eda.pcb_PrimitiveArc?.create?.(
 					NET,
 					targetLayer,
@@ -241,7 +275,7 @@ async function writeOne(
 					CY(p1.y),
 					CX(p2.x),
 					CY(p2.y),
-					sweepDeg,
+					radToDeg(sweepRad),
 					ctx.width,
 					ARC_MODE_TWO_POINT,
 					false,
@@ -315,6 +349,32 @@ function pointOnCircle(center: { x: number; y: number }, radius: number, angleRa
 		x: center.x + Math.cos(angleRad) * radius,
 		y: center.y + Math.sin(angleRad) * radius,
 	};
+}
+
+/** 圆弧扫掠角归一化到 (-2π, 2π)，负值表示顺时针。 */
+function normalizeSweepRad(sweepRad: number): number {
+	if (!Number.isFinite(sweepRad))
+		return 0;
+	let s = sweepRad;
+	while (s > Math.PI * 2)
+		s -= Math.PI * 2;
+	while (s < -Math.PI * 2)
+		s += Math.PI * 2;
+	return s;
+}
+
+/** 采样圆弧为折线点列（含两个端点）。 */
+function arcPoints(
+	center: { x: number; y: number },
+	radius: number,
+	startAngle: number,
+	sweepRad: number,
+	segments: number,
+): Array<{ x: number; y: number }> {
+	const pts: Array<{ x: number; y: number }> = [];
+	for (let i = 0; i <= segments; i++)
+		pts.push(pointOnCircle(center, radius, startAngle + (sweepRad * i) / segments));
+	return pts;
 }
 
 function circlePoints(center: { x: number; y: number }, radius: number, segments: number): Array<{ x: number; y: number }> {

@@ -155,7 +155,7 @@
        - 左侧列表：DWG 中所有图层（显示颜色色块、实体计数）。
        - 右侧每行：勾选框（是否导入）+ PCB 层下拉 + 颜色预览 + “建议匹配”按钮。
        - 顶部一行工具栏：全选/全不选 / 一键按颜色匹配 / 一键按名字相似度建议 / 重置。
-    3. **选项段**（折叠面板，默认展开）：实体类型开关（多选 LINE/LWPOLYLINE/POLYLINE/CIRCLE/ARC/TEXT/MTEXT/SPLINE）、线宽默认（如 4 mil）、单位（auto/mm/cm/m/inch/mil，AutoCAD 单位）、跳过空图层、合并相邻共线段（v1 仅占位 UI，不实现）。
+    3. **选项段**（折叠面板，默认展开）：实体类型开关（多选 LINE/LWPOLYLINE/POLYLINE/CIRCLE/ARC/TEXT/MTEXT/SPLINE）、线宽默认（如 8 mil）、单位（auto/mm/cm/m/inch/mil，AutoCAD 单位）、跳过空图层、合并相邻共线段（v1 仅占位 UI，不实现）。
     4. **预览段**（可滚动）：解析结果摘要（实体总数、包围盒、图层数）、失败日志列表（折叠）。
   - 底栏：`取消` / `导入 (N 个图元)`，按钮禁用态取决于解析状态与有效映射数。
 - **交互细节**：
@@ -207,7 +207,7 @@
 ### 3.7 F6 — 实体类型开关与导入选项
 
 - 实体类型开关：默认全选（除 SPLINE 之外）；SPLINE v1 仅做"导入为多段折线"近似（控制点等距采样，段数 64）。
-- 线宽默认 4 mil，UI 提供 1 / 2 / 4 / 6 / 8 / 10 / 20 mil 常用预设 + 自定义。
+- 线宽默认 8 mil，UI 提供 1 / 2 / 4 / 6 / 8 / 10 / 20 mil 常用预设 + 自定义。
 - 单位：
   - 通过 IR 携带的 `INSUNITS` 自动选择（DWG header），UI 显示当前判定结果。
   - 用户可手动覆盖 `mm` 或 `inch`，仅影响坐标缩放。
@@ -226,8 +226,8 @@
   - LINE → `pcb_PrimitiveLine.create(net, layer, x1, y1, x2, y2, width, locked)`
   - LWPOLYLINE / POLYLINE（顶点 ≤ 32）→ `pcb_PrimitiveRegion.create(...)`（填充区域/轮廓，取决于闭合与图层）。
   - POLYLINE（顶点 > 32 或开放）→ `pcb_PrimitivePolyline.create(points, width, layer)`
-  - CIRCLE → `pcb_PrimitivePolyline`（用 32 段折线近似）或在 PCB 上转成两个 `pcb_PrimitiveArc` 拼接（v1 选前者）。
-  - ARC → `pcb_PrimitiveArc.create(layer, cx, cy, r, startAngle, endAngle, width)`
+  - CIRCLE → `pcb_PrimitivePolyline`（用 64 段折线近似）。
+  - ARC → 图形层：`pcb_PrimitivePolyline`（按矢高容差采成开放折线——真机实测 ArcTrack 在图形层能显示但无法拾取）；信号层：`pcb_PrimitiveArc.create(net, layer, x1, y1, x2, y2, arcAngle, width, TWO_POINT_ARC, locked)`。
   - TEXT / MTEXT → `pcb_PrimitiveString.create(x, y, content, layer, height, rotation)`（EDA 文本高度约 = DWG 文本高度的 0.8 倍，需要做单位转换）。
   - SPLINE → 64 段折线近似。
 - **性能**：单次导入 > 500 个图元时使用 `eda.sys_LoadingAndProgressBar.start(...)` 显示进度；批量请求用 `Promise.all` 切片（每批 50，避免栈/内存爆）。
@@ -358,7 +358,7 @@ export interface DwgIR {
 │  选项 ▾                                                      │
 │   实体： ☑ LINE ☑ LWPOLYLINE ☑ POLYLINE ☑ CIRCLE ☑ ARC      │
 │         ☑ TEXT  ☑ MTEXT  ☑ SPLINE                            │
-│   线宽：[ 4 mil ▾ ]   单位：( AutoCAD: mm ▾ )                │
+│   线宽：[ 8 mil ▾ ]   单位：( AutoCAD: mm ▾ )                │
 │   ☑ 跳过空图层     ☐ 合并共线段（即将推出）                  │
 ├──────────────────────────────────────────────────────────────┤
 │  预览                                                         │

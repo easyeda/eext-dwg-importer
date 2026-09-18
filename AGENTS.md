@@ -37,7 +37,9 @@ src/
     dwg/parser.ts           wasm 加载 + parseDwg(buffer) → IR（所有 libredwg 调用收敛在此一处）
     dwg/ir.ts               原始实体 → IR（含嵌套 BLOCK 递归展开 + 循环引用检测）
     dwg/block-expander.ts   INSERT 仿射展开（平移/缩放/旋转/镜像）
-    dwg/spline-sampler.ts   SPLINE 自适应采样（16–128 段）
+    dwg/spline-fit.ts      SPLINE（B 样条 / 拟合点型）求值 + 自适应采样
+    dwg/mtext.ts           MTEXT 格式码清理、按 rectWidth 折行与行距
+    dwg/infinite-line.ts   XLINE / RAY 假端点与 Liang-Barsky 裁剪
     dwg/layer-suggest.ts    图层智能建议（颜色距离 + 名字关键词）
     storage.ts              sys_Storage 封装（启动参数 KEY_LAUNCH + 用户偏好）
     ui/                     纯原生 DOM 组件（file / layer-mapping / options / styles.css）

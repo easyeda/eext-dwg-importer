@@ -174,34 +174,45 @@ body {
 
 /* ── 右栏顶部文件状态条 ─────────────────────────────────── */
 
-/* 比 .card 更紧凑：一条状态条，不与选项卡片争高度 */
+/*
+ * 比 .card 更紧凑：一条状态条，不与选项卡片争高度。
+ *
+ * **高度固定 74px**（用户反馈：选文件/解析完成后卡片高度会跳动，下面内容跟着移）。
+ * 三个要点缺一不可：
+ *   1. 三行（文件名 / 状态 / 尺寸）始终占位——原来用 `:empty{display:none}`
+ *      隐藏空行，空闲态只有一行，高度自然比解析后矮；
+ *   2. 每行给 min-height——**空元素即使设了 line-height 高度也是 0**，
+ *      去掉 :empty 规则而不给 min-height 依然撑不住；
+ *   3. 行内一律单行省略（nowrap + ellipsis）——换行会撑高卡片，
+ *      被截断的完整内容用 title 悬停查看（见 ui/file-section.ts）。
+ * 高度构成：padding 8+8 + border 1+1 + 行高 18 + (17+2) + (17+2) = 74px。
+ */
 .file-status-card {
 	padding: 8px 10px;
 	flex: 0 0 auto;
+	height: 74px;
+	overflow: hidden;
 }
 
 .file-name {
 	font-weight: 600;
 	font-size: 12px;
+	line-height: 18px;
+	min-height: 18px;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 
-/* 空状态时内容为空，避免占出一条空行 */
-.file-name:empty {
-	display: none;
-}
-
 .status-line {
 	color: var(--text-secondary);
 	font-size: 12px;
+	line-height: 17px;
+	min-height: 17px;
 	margin-top: 2px;
-	word-break: break-all;
-}
-
-.status-line:empty {
-	display: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .btn {
@@ -352,9 +363,21 @@ body {
 
 /* ── 原点偏移行 ─────────────────────────────────────────── */
 
-/* 与上方单位行拉开明显间距，形成「实体类型 / 原点偏移」两个分组的节奏 */
+/* 与上方单位行拉开间距，形成独立分组 */
 .sub-label[data-role="offset-label"] {
 	margin-top: 16px;
+}
+
+/*
+ * 实体类型区域固定在选项卡片底部：
+ * 选项卡片是 flex 纵向容器（.card-grow），margin-top:auto 把这一组连同
+ * 其后的 chip 网格一起推到底边；顶部加分隔线，与上方常用项区分开。
+ * 内容超出卡片高度时 auto 失效、自然跟随排列，不会裁切（卡片不设 overflow）。
+ */
+.sub-label[data-role="kind-label"] {
+	margin-top: auto;
+	padding-top: 12px;
+	border-top: 1px solid var(--border);
 }
 
 /* 输入框均分剩余宽度：右栏固定宽下 X/Y 不再拥挤，按钮也不会被挤出新行 */
@@ -364,10 +387,22 @@ body {
 	flex-wrap: nowrap;
 }
 
-.offset-comma {
+/*
+ * X / Y 轴名：紧贴各自输入框之前，固定宽度不参与伸缩
+ * （原来两个数字框只靠一个逗号分隔，分不清哪个是 X、哪个是 Y）。
+ * 轴名与输入框同属一个 .axis-field（label），组内间隙 6px、组间 8px，
+ * 归属一目了然；label 包住输入框后点轴名即可聚焦。
+ */
+.axis-field {
+	flex: 1 1 40px;
+	min-width: 0;
+}
+
+.axis-label {
 	color: var(--text-secondary);
-	user-select: none;
+	font-size: 12px;
 	flex: 0 0 auto;
+	user-select: none;
 }
 
 .num-input {

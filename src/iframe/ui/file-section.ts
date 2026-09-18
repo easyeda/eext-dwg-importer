@@ -31,6 +31,10 @@ export interface FileSection {
 		unitLabel: string,
 		size: { width: number; height: number },
 	) => void;
+	/**
+	 * @param message **完整**文案（含「解析失败」等前缀，由调用方用 t() 组装）——
+	 *   状态条是固定高度单行省略，三种失败场景的前缀各不相同，故不再由本节统一加前缀。
+	 */
 	setStatusError: (message: string) => void;
 	onFileSelected: (cb: (file: File) => void) => void;
 	destroy: () => void;
@@ -55,6 +59,15 @@ export function createFileSection(
 
 	/** 尺寸数字：最多两位小数并去掉尾随零（297.00 → 297，210.56 → 210.56）。 */
 	const fmtNum = (n: number): string => Number(n.toFixed(2)).toString();
+
+	/**
+	 * 状态条三行都是固定高度的单行省略（见 styles.css 的 .file-status-card），
+	 * 故同时写入 title：文本被省略号截断时，悬停仍能看全（错误原因尤其重要）。
+	 */
+	const setLine = (el: HTMLElement, text: string): void => {
+		el.textContent = text;
+		el.title = text;
+	};
 
 	// 拖拽区本身即点击入口（不再单独放「选择文件」按钮）。
 	drop.textContent = t('Drop DWG file here or click to select');
@@ -86,38 +99,38 @@ export function createFileSection(
 	function emitFile(file: File): void {
 		const name = file.name;
 		const sizeKb = (file.size / 1024).toFixed(1);
-		nameLabel.textContent = `${name} · ${sizeKb} KB`;
+		setLine(nameLabel, `${name} · ${sizeKb} KB`);
 		onSelect?.();
 		for (const h of handlers) h(file);
 	}
 
 	const section: FileSection = {
 		setStatusIdle() {
-			statusLabel.textContent = t('Status: idle');
-			sizeLabel.textContent = '';
+			setLine(statusLabel, t('Status: idle'));
+			setLine(sizeLabel, '');
 		},
 		setStatusParsing(percent: number) {
-			statusLabel.textContent = t('Status: parsing {0}%', String(percent));
-			sizeLabel.textContent = '';
+			setLine(statusLabel, t('Status: parsing {0}%', String(percent)));
+			setLine(sizeLabel, '');
 		},
 		setStatusParsed(entityCount: number, layerCount: number, unitLabel: string, size: { width: number; height: number }) {
-			statusLabel.textContent = t(
+			setLine(statusLabel, t(
 				'Status: parsed, {0} primitives, {1} layers, unit {2}',
 				String(entityCount),
 				String(layerCount),
 				unitLabel,
-			);
+			));
 			// 整体 bbox 用图纸原始单位显示：数值的量级本身就是选单位的依据
 			// （如 297×210 → mm 图框；11.7×8.3 → inch；×1000 量级 → 单位声明缺失）。
-			sizeLabel.textContent = t(
+			setLine(sizeLabel, t(
 				'Extents: {0} × {1} (drawing units)',
 				fmtNum(size.width),
 				fmtNum(size.height),
-			);
+			));
 		},
 		setStatusError(message: string) {
-			statusLabel.textContent = t('Status: parse failed: {0}', message);
-			sizeLabel.textContent = '';
+			setLine(statusLabel, message);
+			setLine(sizeLabel, '');
 		},
 		onFileSelected(cb) {
 			handlers.push(cb);

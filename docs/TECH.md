@@ -129,7 +129,9 @@
 | `src/iframe/dwg/block-expander.ts` | INSERT → 几何副本（含仿射变换） |
 | `src/iframe/dwg/ir.ts` | IR 类型定义；从 libredwg 输出构造 IR |
 | `src/iframe/dwg/layer-suggest.ts` | 智能建议：颜色查表 + 名字归一化 |
-| `src/iframe/dwg/spline-sampler.ts` | 自适应采样（区间 16–128） |
+| `src/iframe/dwg/spline-fit.ts` | SPLINE（B 样条 / 拟合点型）求值 + 自适应采样 |
+| `src/iframe/dwg/mtext.ts` | MTEXT 格式码清理、按 rectWidth 折行、行距与附着点 |
+| `src/iframe/dwg/infinite-line.ts` | XLINE / RAY 假端点与 Liang-Barsky 裁剪 |
 | `src/iframe/storage.ts` | `sys_Storage` 封装：lastDir / lineWidth / unit / **启动参数** |
 | `src/internal/import-dwg.ts` | 菜单入口：探测文档类型 → 写启动参数 → `openIFrame` |
 | `src/write/pcb-writer.ts` | IR + mapping + options → PCB Primitive API（PCB / Footprint 共用） |
@@ -362,32 +364,43 @@ function transformPoint(p: DwgPoint, t: InsertTransform): DwgPoint {
 
 **说明**：若 `@mlightcad/libredwg-bab` 原生支持 `expandBlocks: true`，则 `parser.ts` 调用时直接传入；本模块作为 fallback，在 `parser.ts` 检测到不支持时启用二次遍历（详见 §5.2）。
 
-### 4.2 SPLINE 自适应采样
+### 4.2 曲线求值采样，以及文本与特殊实体的换算
 
-**目标**：将 B 样条曲线转成 16–128 段折线，控制最大视觉偏差 < 0.1 mm（数据层单位）。
+**目标**：SPLINE（B 样条 / 贝塞尔 / 拟合点型）必须先**求值**再采样成折线——控制点只是定义数据，
+直接连线等于把控制多边形画出来（v1.2.0 前就是这样，曲线全变折线）。
 
 ```ts
-// src/iframe/dwg/spline-sampler.ts
-export function sampleSpline(
-  controlPoints: DwgPoint[],
-  closed: boolean,
-  maxDeviationMm = 0.1,
-  minSegments = 16,
-  maxSegments = 128,
-): DwgPoint[] {
-  // 1. 用包围盒估算初始段数：
-  //    segments = clamp(
-  //      Math.ceil(bezierLength / (2 * maxDeviationMm)),
-  //      minSegments, maxSegments,
-  //    )
-  // 2. 用 De Casteljau 在每段中点二分细判断偏差：
-  //    若 |mid - linear_interp(p_i, p_{i+1})| > maxDeviationMm，
-  //    则把当前段再分两段；递归直到全部偏差合格。
-  // 3. 返回新点序列；闭合时首尾相等。
-}
+// src/iframe/dwg/spline-fit.ts
+export function sampleSplineCurve(input: SplineCurveInput, options?: SampleSplineOptions): DwgPoint[];
 ```
 
-**误差度量**：用控制多边形长度近似弧长初估；实际细判断用 De Casteljau 中点 vs 线性插值的距离。
+- **控制点型**（同时有 `knots` 与 `controlPoints`）：de Boor 求值；`weights` 有效时走齐次坐标
+  （有理样条，四分之一圆可精确复现，实测半径误差 2.2e-16）。
+- **拟合点型**（只有 `fitPoints`，实测 case/example_2018.dwg 的样条即此形态）：以弦长为参数的
+  三次样条插值（moment 形式 + Thomas 解三对角方程），曲线**精确通过**每个拟合点；
+  `startTangent` / `endTangent` 存在时作 clamped 端条件。
+- **采样判据**：矢高 / 弦长 ≤ `tolRatio`（默认 0.002，与图纸尺度无关），递归二分；
+  `maxPoints` 默认 512。**点数超预算时放松容差重采，而不是截断**——
+  截断会丢掉曲线尾段（连端点都没了，实测 0.01% 容差的三次贝塞尔正好被截在 2048 点）。
+- **退化输入**（点数不足 / 节点向量长度不符 / NaN / 权重非法）返回空数组，由调用方回退到
+  原始点串并计入解析警告，绝不抛异常——一张图不应因单条曲线数据异常而整体失败。
+
+**文本（MTEXT → 多行）**：`src/iframe/dwg/mtext.ts`。EDA 的文本图元是**单行**的，MTEXT 必须拆行：
+先按 `\P` / `\X` / 真实换行拆分，清理格式码（字体 / 字高 / 颜色 / 对齐 / 堆叠分数 `\S1/2;` / `%%` 控制码），
+再按参照矩形 `rectWidth` 贪心折行（半角 0.6 字高、全角 1.0 字高估算）；每行一个文本实体，
+按 5/3 × 字高沿 MTEXT 旋转方向逐行下排，首行位置按 `attachmentPoint`（上 / 中 / 下）从插入点反推。
+拆行必须发生在 BLOCK 变换**之后**（只有那时 position 才是最终坐标），故折行参数随实体携带到那一步。
+
+**特殊实体**（均在 `parser.ts` 的 `toRaw` 内）：
+
+- `ACAD_TABLE` → 认领 `*T<n>` 匿名块后按 `startPoint` 恒等 INSERT：解析库对表格实体给出的
+  `name` 与 `blockRecordHandle` **都是空值**，只能按 AutoCAD 的命名约定认领（见 `ToRawContext`）。
+- `WIPEOUT` → `clippingBoundaryPath` 的**归一化**坐标（实测 -0.5..0.5）经
+  `position + uPixel·(nx·imageSize.x) + vPixel·(ny·imageSize.y)` 换算为世界坐标，导入为闭合轮廓。
+- `XLINE` / `RAY` → 先按 1e6 图纸单位造假端点，块展开后用其他有限实体的包围盒（外扩 2%）
+  做 Liang-Barsky 裁剪（`infinite-line.ts`），完全在框外的丢弃并计数。
+- 无法导入的类型（面域 / 三维实体只有 ACIS 数据）按类型计数，汇总为一条解析警告——
+  不再静默丢弃（`describeSkippedEntities()`）。
 
 ### 4.3 图层智能建议
 
@@ -509,7 +522,7 @@ User            Host (import-dwg.ts)        EDA / iframe (共享同一 JS 上下
 | POLYLINE / LWPOLYLINE（>32 点） | **TODO 实测**：若 EDA 接受，则单次 create；否则拆为多段 `[i*32, (i+1)*32]` | 见 §9.4 |
 | SPLINE | `pcb_PrimitivePolyline.create(sampled, width, layer, locked)` | 先 §4.2 采样 |
 | CIRCLE | `pcb_PrimitivePolyline.create(sampled, width, layer, locked)` | 32 段折线近似 |
-| ARC | `pcb_PrimitiveArc.create(layer, cx, cy, r, startAngle, endAngle, width, net, locked)` | 注意角度单位：EDA 用角度，DWG 用弧度 |
+| ARC | 图形层：`pcb_PrimitivePolyline.create(polygon, width, layer, locked)`（真机实测：ArcTrack 在图形层能显示但**无法拾取**，故按容差采成开放折线）；信号层：`pcb_PrimitiveArc.create(net, layer, x1, y1, x2, y2, arcAngle, width, TWO_POINT_ARC, locked)` | 注意角度单位：EDA 用角度，DWG 用弧度；零扫掠弧跳过（§9.10） |
 | TEXT / MTEXT | `pcb_PrimitiveString.create(x, y, content, layer, height, rotation, locked)` | height = dwgTextHeight * 0.8（视觉对齐） |
 
 ### 6.2 通用骨架
@@ -653,6 +666,13 @@ const wasmUrl = new URL('../assets/libredwg-XXXX.wasm', import.meta.url).href;
 **降级**：若超限，按 32 点为段拆分（§6.1 TODO）。
 **TODO**：编码前先写一个 50 行的 `scripts/test-polyline-limit.mjs` 在 EDA 里实测。
 
+> **实测补充（v1.1.1）**：圆一直按 64 点采样成折线（`circlePoints(..., 64)`），
+> 实机导入与拾取均正常，说明 64 点远未触及上限；仍未实测到硬上限，故对超密几何
+> 采取**保守预算**而非依赖上限：凸度展开时单实体点数上限 4096（`MAX_POINTS_PER_ENTITY`），
+> 超预算时只保留每段 1 个保底内插点（总量不超过 max(4096, 2×顶点数)），
+> 顶点数超过 32768 的多段线整体不展开（机器生成的超密线，弧段细节已远小于图纸尺度）。
+> 若实机出现「超密多段线创建失败」，优先怀疑此上限并从这里下调预算。
+
 ### 9.5 4.1 中 INSERT 实体不进 IR 的 type 安全
 
 `rawEntities` 来自 wasm 输出，可能含 INSERT 但 IR 类型不包含。处理方式：在 `ir.ts` 引入 `DwgInsertEntity` 作为 IR 内部临时类型，**只在 parser.ts → block-expander.ts 之间流转**，对外（iframe → 主进程）的 IR 类型中**不暴露 INSERT**。
@@ -728,6 +748,49 @@ EDA 会把 iframe 弹窗容器 id 生成为 `<extensionUuid>.<iframeId>`
 
 **验证**：`npm run build` 后查 `dist/assets/libredwg-*.wasm` 大小。
 **降级**：wasm gzip；仍超则拆分非关键路径（如颜色提取走 js 实现，wasm 只负责几何）。
+
+### 9.10 DWG 位域与曲线字段的解码陷阱（v1.1.1 实测）
+
+**取真值的唯一可靠手段**：`libredwg.dwg_write_dxf(buffer)` 让 libredwg 自己写出 DXF，
+再按 **handle** 把 DXF 条目与解析库实体逐条对齐（DXF 的 group 码是公开语义，
+可直接当标准答案）。**不要靠猜位序**——下面两处都曾猜错。
+
+**（1）LWPOLYLINE 的闭合位是 512，不是 bit0。**
+
+| 解析库 `flag` | DXF group 70 | 含义 |
+| --- | --- | --- |
+| 0 | 0 | 开放 |
+| 512 | 1 | 闭合 |
+| 528（512+16） | 1 | 闭合 |
+
+上游 `vendor/libredwg-web/libredwg-web.js` 的渲染路径同样写的是
+`const closed = !!(lwpolyline.flag & 512)`。
+**旧式 POLYLINE2D/POLYLINE3D 的 `flag` 与 DXF group 70 同构，闭合位仍是 bit0**
+（实测 handle 41A：`flag=1`、DXF `70=9` = 1 闭合 + 8 三维多段线），两类必须分别判定。
+按 bit0 误判的后果：所有 512/528 的闭合轮廓被当成开放导入，**每个轮廓少画最后一段闭合线**
+（实测案例 27 条多段线里 26 条实际闭合，误判后只剩 16 条），用户看到的就是「丢线段、不闭合」。
+
+**（2）多段线顶点凸度 `bulge = tan(θ/4)`，必须展开成点列。**
+
+解析库字段与 DXF group 42 数值完全一致（实测 ±0.52056705 → 每段 110°）。
+只取顶点坐标会把圆弧退化成直弦。展开要点：
+
+- 弦长 `c`、扫掠角 `θ = 4·atan(bulge)`、半径 `r = c / (2·sin(θ/2))`，
+  圆心在弦中点沿左法线偏移 `h = r·cos(θ/2)`（`|θ|>180°` 时 `cos` 为负，圆心自动落到另一侧）；
+- **负凸度时 `r` 是负数，取点必须用 `|r|`**，否则整段弧被镜像到圆心另一侧。
+  注意「各点到圆心等距」的自检**发现不了**这个错误（镜像点仍在同一圆上），
+  必须用解析解（如 b=0.4142 → 圆心 (0.5,0.5)、矢高 = b·c/2）或与上游渲染曲线交叉验证；
+- 采样密度按「矢高 / 弦长」相对容差（2%）自适应，见 `src/shared/curve.ts`；
+- 验证脚本可复用上游 `createPolylineArcPoints`（5° 细采样）作为参考曲线：
+  实测展开点对参考曲线的最大偏差 3.7e-2（弦长 50、图宽 14300 单位）。
+
+**（3）图形层的圆弧要用折线，不要用 ArcTrack。**
+
+`pcb_PrimitiveArc`（ArcTrack）省略 net 后能在丝印等图形层创建并正常显示，
+但**导入后无法被拾取/选中**；同层直线与圆因改用折线（Polyline）而选择正常。
+故图形层统一走折线：直线 = 两点开放折线，圆 = 64 点闭合折线，圆弧 = 按容差采样的开放折线；
+信号层保留原生 Track/ArcTrack（电气图元）。零扫掠圆弧（起止角相同）与零长度线段、
+零半径圆一样直接跳过——它们会创建无法选中/删除的零尺寸幽灵图元。
 
 ---
 
@@ -867,7 +930,7 @@ iframeContainerbded3619ce6a4e60a35c7f4a84739702.dwgimporterwin
 |---|---|---|---|
 | ADR-1 | wasm 随 eext 打包，不走 CDN | 动态从 CDN 加载 | 易受网络/CDN 故障影响；首次进入弹窗体验差；离线不可用 |
 | ADR-2 | **解析与写图元全部在 iframe 内完成，无跨帧通信** | 主进程与 iframe 分工 + 消息层 | 见 ADR-12：EDA 无跨帧消息 API，且 iframe 可直接用 `eda` |
-| ADR-3 | SPLINE 自适应采样，区间 16–128 段 | 固定 64 段 | 自适应在低曲率处更省、在高曲率处更准 |
+| ADR-3 | SPLINE 求值后按相对矢高采样（§4.2），单曲线 512 点预算 | 固定 64 段折线 / 控制点直连 | 控制点直连会把曲线画成控制多边形；相对判据与图纸尺度无关，超预算时放宽容差而非截断 |
 | ADR-4 | BLOCK 二次遍历作为 fallback（若库不支持原生展开） | 仅依赖库原生展开 | 部分 libredwg 版本不支持；二次遍历保证跨版本稳定 |
 | ADR-5 | 仓库协议为 **GPL-3.0-or-later** | 保持 Apache-2.0；或 GPL-2.0 | 实际解析库 `@mlightcad/libredwg-web` 为 **GPL-3.0**，GPL-2.0 与之不兼容 |
 | ADR-6 | 弹窗内原生 DOM + CSS，无框架 | 引入 React/Vue | 包体敏感；交互简单无需框架 |
@@ -1091,6 +1154,6 @@ export function createStateMachine(initial: Record<State, unknown>) {
 
 | 项 | PRD | TECH 决策 |
 |---|---|---|
-| SPLINE 采样 | 64 段固定 | 自适应 16–128（§4.2） |
+| SPLINE 采样 | 64 段固定 | 求值后按相对矢高自适应采样 + 512 点预算（§4.2） |
 | POLYLINE 拆分 | 顶点 ≤32 → Region / Polyline；>32 拆段 | **按实际顶点数输出**（§6.1）；TODO 实测 EDA 上限（§9.4） |
 | lastDir 降级 | toast 提示 | 保留 toast（PRD 方案） |
