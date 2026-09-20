@@ -200,8 +200,10 @@ export async function pickOriginOnCanvas(
 					msg?.showToastMessage?.(t('Failed to read the canvas position. Please try again.'));
 					return;
 				}
-				log('拾取到坐标', pos.x, pos.y);
-				settle({ x: pos.x, y: pos.y });
+				// getCurrentMousePosition 给的是数据原点坐标，回填前换算成用户看到的画布原点坐标
+				const canvasPos = await toCanvasOrigin(eda, isSch, pos, log);
+				log('拾取到坐标', `数据(${pos.x},${pos.y})`, `画布(${canvasPos.x},${canvasPos.y})`);
+				settle(canvasPos);
 			})();
 		};
 
@@ -383,4 +385,47 @@ async function ensureSelectedPrimitive(eda: EdaGlobals, isSch: boolean): Promise
 	catch {
 		return null;
 	}
+}
+
+/**
+ * 数据原点坐标 → 画布（业务）原点坐标。
+ *
+ * EDA 前端显示的是画布原点，API 与图元坐标用的是数据原点（两者在新建 PCB 时重合，
+ * 但用户可以设置画布原点偏移）。getCurrentMousePosition() 返回数据原点坐标，
+ * 而选项里的偏移是给用户看、由用户填的，必须换算成画布坐标；写入侧再换回数据坐标
+ * （见 pcb-writer.ts），否则图元会整体平移一个画布原点偏移。
+ *
+ * 拿不到换算接口时保留原值并写日志——拾取仍然可用，只是数字按数据原点显示。
+ */
+async function toCanvasOrigin(
+	eda: EdaGlobals,
+	isSch: boolean,
+	pos: { x: number; y: number },
+	log: (message: string, ...args: unknown[]) => void,
+): Promise<{ x: number; y: number }> {
+	// 原理图侧未确认有对应换算接口：按两原点重合处理，仅记录。
+	if (isSch) {
+		log('原理图侧不做画布原点换算（按两原点重合）');
+		return pos;
+	}
+	const doc = (eda as unknown as {
+		pcb_Document?: {
+			convertDataOriginToCanvasOrigin?: (x: number, y: number) => Promise<{ x: number; y: number }>;
+		};
+	}).pcb_Document;
+	const convert = doc?.convertDataOriginToCanvasOrigin;
+	if (typeof convert !== 'function') {
+		log('缺少 pcb_Document.convertDataOriginToCanvasOrigin，按数据原点回填');
+		return pos;
+	}
+	try {
+		const canvas = await convert(pos.x, pos.y);
+		if (canvas && Number.isFinite(canvas.x) && Number.isFinite(canvas.y))
+			return { x: canvas.x, y: canvas.y };
+		log('换算返回非数值，按数据原点回填');
+	}
+	catch (err) {
+		log('原点换算失败，按数据原点回填:', (err as Error)?.message);
+	}
+	return pos;
 }

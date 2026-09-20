@@ -71,5 +71,8 @@
 	"Multi-Layer": "Multi-Layer",
 	"Mechanical Layer": "Mechanical Layer",
 	"Document Layer": "Document Layer",
-	"Inner Layer {0}": "Inner Layer {0}"
+	"Inner Layer {0}": "Inner Layer {0}",
+	"Top Assembly": "Top Assembly",
+	"Bottom Assembly": "Bottom Assembly",
+	"Custom Layer {0}": "Custom Layer {0}"
 }

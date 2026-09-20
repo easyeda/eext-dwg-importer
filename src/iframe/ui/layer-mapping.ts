@@ -5,6 +5,7 @@
  */
 
 import type { DwgLayer, LayerMapping, PcbLayerInfo } from '../../shared/types';
+import { LAYER } from '../../shared/eda-api';
 import { t } from '../../shared/i18n';
 import { need } from './dom';
 import { suggestAllByColor, suggestAllByName } from './layer-suggest-bridge';
@@ -103,18 +104,20 @@ export function createLayerMapping(root: HTMLElement): LayerMappingSection {
 		}
 		render();
 	});
-	need(root, 'col-pcb').appendChild(bulk);
+	const pcbHeaderCell = need(root, 'col-pcb');
+	pcbHeaderCell.parentElement?.classList.add('layer-bulk-cell');
+	pcbHeaderCell.appendChild(bulk);
 
 	function renderBulkOptions(): void {
 		bulk.innerHTML = `<option value="${NONE_VALUE}">${escapeHtml(t('Set all layers to...'))}</option>${
-			pcbLayers.map(p => `<option value="${p.id}">${escapeHtml(layerLabel(p.name))}</option>`).join('')}`;
+			pcbLayers.map(p => `<option value="${p.id}">${escapeHtml(layerLabelOf(p))}</option>`).join('')}`;
 		bulk.value = NONE_VALUE;
 	}
 
 	function buildOptionsHtml(): string {
 		const opts = [`<option value="${NONE_VALUE}">${escapeHtml(pcbNone.name)}</option>`];
 		for (const p of pcbLayers) {
-			opts.push(`<option value="${p.id}">${escapeHtml(layerLabel(p.name))}</option>`);
+			opts.push(`<option value="${p.id}">${escapeHtml(layerLabelOf(p))}</option>`);
 		}
 		return opts.join('');
 	}
@@ -251,4 +254,52 @@ function aciToCss(aci: number): string {
 		7: '#ffffff',
 	};
 	return palette[aci] ?? `rgb(${Math.min(255, aci * 32)}, ${Math.min(255, aci * 32)}, ${Math.min(255, aci * 32)})`;
+}
+
+/**
+ * PCB 层显示名：**按层 ID** 取文案，保证与 PCB 默认层名一致、且随界面语言切换。
+ *
+ * 为什么不按名字翻译：EDA 返回的层名本身随客户端语言变化（中文客户端给「顶层丝印」、
+ * 英文客户端给「Top Silkscreen」），靠名字反查既漏又容易误配；层 ID 是稳定的枚举值
+ * （EPCB_LayerId，见 eda-api.ts 的 LAYER 常量）。ID 识别不出来时（自定义层等）再退回
+ * 名字表（layerLabel），最后原样显示 EDA 给的名字。
+ */
+function layerLabelOf(p: PcbLayerInfo): string {
+	const byId: Record<number, string> = {
+		1: 'Top Layer',
+		2: 'Bottom Layer',
+		3: 'Top Silkscreen',
+		4: 'Bottom Silkscreen',
+		5: 'Top Solder Mask',
+		6: 'Bottom Solder Mask',
+		7: 'Top Paste Mask',
+		8: 'Bottom Paste Mask',
+		9: 'Top Assembly',
+		10: 'Bottom Assembly',
+		11: 'Board Outline',
+		12: 'Multi-Layer',
+		13: 'Document Layer',
+		14: 'Mechanical Layer',
+	};
+	const key = byId[p.id];
+	if (key) {
+		const label = t(key);
+		if (label && label !== key)
+			return label;
+	}
+	// 内层 15..44 → 内层 N（N 从 1 起）
+	if (p.id >= LAYER.INNER_1 && p.id <= LAYER.INNER_30) {
+		const num = String(p.id - LAYER.INNER_1 + 1);
+		const tpl = t('Inner Layer {0}');
+		if (tpl !== 'Inner Layer {0}')
+			return tpl.replace('{0}', num);
+	}
+	// 自定义层 71..100 → 自定义层 N
+	if (p.id >= LAYER.CUSTOM_1 && p.id <= LAYER.CUSTOM_30) {
+		const num = String(p.id - LAYER.CUSTOM_1 + 1);
+		const tpl = t('Custom Layer {0}');
+		if (tpl !== 'Custom Layer {0}')
+			return tpl.replace('{0}', num);
+	}
+	return layerLabel(p.name);
 }

@@ -463,3 +463,18 @@ body {
 ::-webkit-scrollbar-thumb:hover {
 	background: var(--text-muted);
 }
+
+/*
+ * 图层分配表头：让「批量设置」下拉跟在「PCB 层」文字后面同一行。
+ * 类由 layer-mapping.ts 加在表头单元格上（不依赖 :has 之类的选择器）。
+ */
+.layer-bulk-cell {
+	white-space: nowrap;
+}
+
+.layer-bulk-select {
+	display: inline-block;
+	margin-left: 6px;
+	max-width: 10rem;
+	vertical-align: middle;
+}

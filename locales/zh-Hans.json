@@ -59,8 +59,8 @@
 	"XREF {0} not resolved (cross-file), skipped": "跨文件 XREF {0} 未解析，已跳过",
 	"Set all layers to": "批量设置全部图层为",
 	"Set all layers to...": "批量设置全部图层...",
-	"Top Layer": "顶层",
-	"Bottom Layer": "底层",
+	"Top Layer": "顶层铜层",
+	"Bottom Layer": "底层铜层",
 	"Top Silkscreen": "顶层丝印",
 	"Bottom Silkscreen": "底层丝印",
 	"Top Solder Mask": "顶层阻焊",
@@ -71,5 +71,8 @@
 	"Multi-Layer": "多层",
 	"Mechanical Layer": "机械层",
 	"Document Layer": "文档层",
-	"Inner Layer {0}": "内层 {0}"
+	"Inner Layer {0}": "内层 {0}",
+	"Top Assembly": "顶层装配",
+	"Bottom Assembly": "底层装配",
+	"Custom Layer {0}": "自定义层 {0}"
 }

@@ -153,6 +153,12 @@ async function writeOne(
 	 * 坐标换算（含原点偏移）与长度换算（不含偏移）必须分开：
 	 * 坐标 = 偏移 + DWG 值换算成 mil；半径、字高等尺寸只做单位换算。
 	 */
+	/*
+	 * 画布（业务）原点 → 数据原点：选项里的原点偏移是给用户看的画布坐标（拾取回填的
+	 * 也是画布坐标），而图元创建 API 用的是数据原点——不换回去整张图会平移一个画布
+	 * 原点偏移。拿不到换算接口时按两原点重合处理（新建 PCB 默认就是重合的）。
+	 */
+	ctx.offset = await toDataOrigin(eda, ctx.offset);
 	const CX = (v: number): number => ctx.offset.x + dwgToMil(v, ctx.units);
 	const CY = (v: number): number => ctx.offset.y + dwgToMil(v, ctx.units);
 	const LN = (v: number): number => dwgToMil(v, ctx.units);
@@ -384,4 +390,36 @@ function circlePoints(center: { x: number; y: number }, radius: number, segments
 	}
 	// 不在此处补首点：闭合由 mkPolygon 统一处理，避免重复。
 	return pts;
+}
+
+/**
+ * 画布（业务）原点坐标 → 数据原点坐标（供图元创建 API 使用）。
+ *
+ * 与 canvas-pick.ts 的 toCanvasOrigin 互为一对：拾取把数据坐标换成画布坐标回填，
+ * 写入再换回数据坐标。偏移为 0（两原点重合）时直接返回，省一次 API 调用。
+ * 换算接口缺失或失败时保留原值——行为与改造前一致，不阻断导入。
+ */
+async function toDataOrigin(
+	eda: unknown,
+	offset: { x: number; y: number },
+): Promise<{ x: number; y: number }> {
+	if (offset.x === 0 && offset.y === 0)
+		return offset;
+	const doc = (eda as {
+		pcb_Document?: {
+			convertCanvasOriginToDataOrigin?: (x: number, y: number) => Promise<{ x: number; y: number }>;
+		};
+	} | undefined)?.pcb_Document;
+	const convert = doc?.convertCanvasOriginToDataOrigin;
+	if (typeof convert !== 'function')
+		return offset;
+	try {
+		const data = await convert(offset.x, offset.y);
+		if (data && Number.isFinite(data.x) && Number.isFinite(data.y))
+			return { x: data.x, y: data.y };
+	}
+	catch {
+		// 换算失败：保持原值（与改造前行为一致），不阻断导入
+	}
+	return offset;
 }
