@@ -3,9 +3,7 @@
 	"About Import DWG": "关于 DWG 导入器",
 	"Import DWG v": "DWG 导入器 v{0}",
 	"Import DWG Description": "本扩展使用 libredwg wasm 解析 DWG 文件，并按 GPL-3.0-or-later 协议分发。源码仓库：https://github.com/easyeda/eext-dwg-importer",
-
 	"Import DWG": "导入 DWG",
-
 	"Drop DWG file here or click to select": "将 DWG 文件拖到此处，或点击选择",
 	"Parse": "解析",
 	"Cancel": "取消",
@@ -21,7 +19,6 @@
 	"Status: importing {0}/{1}": "状态：导入中 {0}/{1}",
 	"Status: import done, {0} primitives created, {1} failed": "状态：导入完成，新增 {0} 个图元，{1} 个失败",
 	"Nothing imported: all layers are unmapped or filtered. Check the layer mapping and options.": "未导入任何图元：所有图层都未映射或被选项过滤。请检查图层映射与导入选项。",
-
 	"Layer mapping": "图层映射",
 	"PCB layer": "PCB 层",
 	"Do not import": "不导入",
@@ -30,7 +27,6 @@
 	"Match by color": "按颜色匹配",
 	"Match by name": "按名字建议",
 	"Reset": "重置",
-
 	"Options": "选项",
 	"Entity types": "实体类型",
 	"Default line width": "默认线宽",
@@ -49,9 +45,7 @@
 	"Pick timed out. The dialog has been restored.": "拾取已超时取消，弹窗已恢复",
 	"Failed to read the canvas position. Please try again.": "未能读取画布坐标，请重试",
 	"Pick failed: {0}": "拾取失败：{0}",
-
 	"Parsed with {0} warning(s). Details are in the log.": "解析完成，但有 {0} 条警告，详见日志",
-
 	"Errors": "错误",
 	"Import failed: {0}": "导入失败：{0}",
 	"Parse error: {0}": "解析失败：{0}",
@@ -62,5 +56,20 @@
 	"DWG version {0} not supported (max: {1})": "DWG 版本 {0} 不受支持（最高支持：{1}）",
 	"Not a DWG file": "不是 DWG 文件",
 	"BLOCK {0} parse failed, skipped": "BLOCK {0} 解析失败，已跳过",
-	"XREF {0} not resolved (cross-file), skipped": "跨文件 XREF {0} 未解析，已跳过"
+	"XREF {0} not resolved (cross-file), skipped": "跨文件 XREF {0} 未解析，已跳过",
+	"Set all layers to": "批量设置全部图层为",
+	"Set all layers to...": "批量设置全部图层...",
+	"Top Layer": "顶层",
+	"Bottom Layer": "底层",
+	"Top Silkscreen": "顶层丝印",
+	"Bottom Silkscreen": "底层丝印",
+	"Top Solder Mask": "顶层阻焊",
+	"Bottom Solder Mask": "底层阻焊",
+	"Top Paste Mask": "顶层锡膏",
+	"Bottom Paste Mask": "底层锡膏",
+	"Board Outline": "板框",
+	"Multi-Layer": "多层",
+	"Mechanical Layer": "机械层",
+	"Document Layer": "文档层",
+	"Inner Layer {0}": "内层 {0}"
 }

@@ -25,6 +25,48 @@ interface Row {
 
 const NONE_VALUE = '__none__';
 
+/**
+ * PCB 层名规范化：EDA 返回的层名可能是中文也可能是英文（取决于客户端语言），
+ * 而扩展自己的界面语言是独立的——所以先归一到英文规范名，再交给 t() 翻译，
+ * 两边都能显示成当前界面语言。
+ */
+const LAYER_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
+	[/^(?:top layer|顶层)$/i, 'Top Layer'],
+	[/^(?:bottom layer|底层)$/i, 'Bottom Layer'],
+	[/^(?:top silkscreen|顶层丝印)$/i, 'Top Silkscreen'],
+	[/^(?:bottom silkscreen|底层丝印)$/i, 'Bottom Silkscreen'],
+	[/^(?:top solder ?mask|顶层阻焊)$/i, 'Top Solder Mask'],
+	[/^(?:bottom solder ?mask|底层阻焊)$/i, 'Bottom Solder Mask'],
+	[/^(?:top paste ?mask|顶层锡膏)$/i, 'Top Paste Mask'],
+	[/^(?:bottom paste ?mask|底层锡膏)$/i, 'Bottom Paste Mask'],
+	[/^(?:board outline|board ?edge|板框|边框)$/i, 'Board Outline'],
+	[/^(?:multi-?layer|多层)$/i, 'Multi-Layer'],
+	[/^(?:mechanical(?: layer)?|机械层?)$/i, 'Mechanical Layer'],
+	[/^(?:document(?: layer)?|文档层?)$/i, 'Document Layer'],
+	[/^(?:inner ?(\d+)|内层 ?(\d+))$/i, 'Inner Layer'],
+];
+
+/** 归一化层名 → 当前界面语言下的显示名；没有对应文案时原样返回。 */
+function layerLabel(name: string): string {
+	let canonical = name;
+	for (const [pattern, key] of LAYER_ALIASES) {
+		const m = pattern.exec(name);
+		if (!m)
+			continue;
+		const num = m[1] ?? m[2];
+		canonical = num ? `${key} ${num}` : key;
+		break;
+	}
+	// 内层按 `Inner Layer N` 归一后，用带序号的文案模板
+	if (canonical.startsWith('Inner Layer ')) {
+		const idx = canonical.slice('Inner Layer '.length);
+		const tpl = t('Inner Layer {0}');
+		return tpl === 'Inner Layer {0}' ? canonical : tpl.replace('{0}', idx);
+	}
+	const translated = t(canonical);
+	return translated && translated !== canonical ? translated : name;
+}
+
 export function createLayerMapping(root: HTMLElement): LayerMappingSection {
 	const tbody = need<HTMLTableSectionElement>(root, 'rows');
 	const toolbar = need(root, 'toolbar');
@@ -41,10 +83,38 @@ export function createLayerMapping(root: HTMLElement): LayerMappingSection {
 	let pcbLayers: PcbLayerInfo[] = [];
 	const pcbNone: PcbLayerInfo = { id: -1, name: t('Do not import') };
 
+	/*
+	 * 表头批量设置：原先只能逐行选层，图层多时很费事。
+	 * 下拉放在「PCB 层」表头里，选中后一次把所有 DWG 图层指到该层（并勾选启用）。
+	 * 占位项只作提示，选中它不会改动任何行。
+	 */
+	const bulk = document.createElement('select');
+	bulk.className = 'layer-bulk-select';
+	bulk.title = t('Set all layers to');
+	bulk.addEventListener('change', () => {
+		if (bulk.value === NONE_VALUE)
+			return;
+		const id = Number.parseInt(bulk.value, 10);
+		if (!Number.isFinite(id))
+			return;
+		for (const r of rows) {
+			r.enabled = true;
+			r.targetLayerId = id;
+		}
+		render();
+	});
+	need(root, 'col-pcb').appendChild(bulk);
+
+	function renderBulkOptions(): void {
+		bulk.innerHTML = `<option value="${NONE_VALUE}">${escapeHtml(t('Set all layers to...'))}</option>${
+			pcbLayers.map(p => `<option value="${p.id}">${escapeHtml(layerLabel(p.name))}</option>`).join('')}`;
+		bulk.value = NONE_VALUE;
+	}
+
 	function buildOptionsHtml(): string {
 		const opts = [`<option value="${NONE_VALUE}">${escapeHtml(pcbNone.name)}</option>`];
 		for (const p of pcbLayers) {
-			opts.push(`<option value="${p.id}">${escapeHtml(p.name)}</option>`);
+			opts.push(`<option value="${p.id}">${escapeHtml(layerLabel(p.name))}</option>`);
 		}
 		return opts.join('');
 	}
@@ -150,6 +220,7 @@ export function createLayerMapping(root: HTMLElement): LayerMappingSection {
 				color: l.color,
 			}));
 			pcbLayers = pcb.slice();
+			renderBulkOptions();
 			render();
 		},
 		getMapping,

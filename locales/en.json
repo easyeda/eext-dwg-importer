@@ -3,9 +3,7 @@
 	"About Import DWG": "About Import DWG",
 	"Import DWG v": "Import DWG v{0}",
 	"Import DWG Description": "This extension uses libredwg wasm to parse DWG files, distributed under GPL-3.0-or-later. Source: https://github.com/easyeda/eext-dwg-importer",
-
 	"Import DWG": "Import DWG",
-
 	"Drop DWG file here or click to select": "Drop a DWG file here, or click to select",
 	"Parse": "Parse",
 	"Cancel": "Cancel",
@@ -21,7 +19,6 @@
 	"Status: importing {0}/{1}": "Status: importing {0}/{1}",
 	"Status: import done, {0} primitives created, {1} failed": "Status: import done, {0} primitives created, {1} failed",
 	"Nothing imported: all layers are unmapped or filtered. Check the layer mapping and options.": "Nothing was imported: all layers are unmapped or filtered out. Check the layer mapping and import options.",
-
 	"Layer mapping": "Layer mapping",
 	"PCB layer": "PCB layer",
 	"Do not import": "Do not import",
@@ -30,7 +27,6 @@
 	"Match by color": "Match by color",
 	"Match by name": "Match by name",
 	"Reset": "Reset",
-
 	"Options": "Options",
 	"Entity types": "Entity types",
 	"Default line width": "Default line width",
@@ -49,9 +45,7 @@
 	"Pick timed out. The dialog has been restored.": "Pick timed out. The dialog has been restored.",
 	"Failed to read the canvas position. Please try again.": "Failed to read the canvas position. Please try again.",
 	"Pick failed: {0}": "Pick failed: {0}",
-
 	"Parsed with {0} warning(s). Details are in the log.": "Parsed with {0} warning(s). Details are in the log.",
-
 	"Errors": "Errors",
 	"Import failed: {0}": "Import failed: {0}",
 	"Parse error: {0}": "Parse failed: {0}",
@@ -62,5 +56,20 @@
 	"DWG version {0} not supported (max: {1})": "DWG version {0} not supported (max: {1})",
 	"Not a DWG file": "Not a DWG file",
 	"BLOCK {0} parse failed, skipped": "BLOCK {0} parse failed, skipped",
-	"XREF {0} not resolved (cross-file), skipped": "Cross-file XREF {0} not resolved, skipped"
+	"XREF {0} not resolved (cross-file), skipped": "Cross-file XREF {0} not resolved, skipped",
+	"Set all layers to": "Set all layers to",
+	"Set all layers to...": "Set all layers to...",
+	"Top Layer": "Top Layer",
+	"Bottom Layer": "Bottom Layer",
+	"Top Silkscreen": "Top Silkscreen",
+	"Bottom Silkscreen": "Bottom Silkscreen",
+	"Top Solder Mask": "Top Solder Mask",
+	"Bottom Solder Mask": "Bottom Solder Mask",
+	"Top Paste Mask": "Top Paste Mask",
+	"Bottom Paste Mask": "Bottom Paste Mask",
+	"Board Outline": "Board Outline",
+	"Multi-Layer": "Multi-Layer",
+	"Mechanical Layer": "Mechanical Layer",
+	"Document Layer": "Document Layer",
+	"Inner Layer {0}": "Inner Layer {0}"
 }

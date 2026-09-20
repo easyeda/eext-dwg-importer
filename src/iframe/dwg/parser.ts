@@ -271,7 +271,7 @@ export async function parseDwg(
 	 * `tableBlocks` 单独预扫一遍：表格可能出现在模型空间（正常情况）也可能在块里，
 	 * 预扫后与遍历顺序无关，且只收「真正会进入 blockDefs 的块」（非布局、非 XREF、非空）。
 	 */
-	const ctx: ToRawContext = { tableBlocks: [], dimBlocks: [], blockAttrTags: [], skipped: new Map<string, number>() };
+	const ctx: ToRawContext = { tableBlocks: [], dimBlocks: [], blockAttrTags: [], notes: [], skipped: new Map<string, number>() };
 	for (const b of blockEntries) {
 		const isLayout = /^\*(?:Model|Paper)_Space/i.test(b.name);
 		const isXref = typeof b.flags === 'number' && (b.flags & 4) !== 0;
@@ -300,6 +300,7 @@ export async function parseDwg(
 	 */
 	collectBlockAttrTags(blockEntries, ctx);
 	assignInsertBlocks(db.entities, ctx);
+	autoAssignRemainingInserts(db.entities, ctx);
 
 	const blockDefsRaw: Array<{ name: string; entities: RawDwgEntity[] }> = [];
 	for (const b of blockEntries) {
@@ -390,6 +391,7 @@ export async function parseDwg(
 	const skippedWarning = describeSkippedEntities(ctx.skipped);
 	if (skippedWarning)
 		parseWarnings.push(skippedWarning);
+	parseWarnings.push(...ctx.notes);
 	if (outliers.length > 0 && threshold !== null) {
 		parseWarnings.push(
 			`已跳过 ${outliers.length} 个离群实体（距主体超过 ${Math.round(threshold)} 图纸单位，`
@@ -432,6 +434,8 @@ interface ToRawContext {
 	dimBlocks: Array<{ name: string; entities?: Array<{ [key: string]: unknown }> }>;
 	/** 块名 → 块内 ATTDEF 标记：无名 INSERT 只能靠属性标记唯一命中来认领（不猜）。 */
 	blockAttrTags: Array<{ name: string; tags: string[] }>;
+	/** 自动判定依据等需要让用户看到的说明（并入解析警告）。 */
+	notes: string[];
 	skipped: Map<string, number>;
 }
 
@@ -877,23 +881,31 @@ function wipeoutBoundaryPoints(e: DwgEntityLike): DwgPoint[] {
 	if (!pos || path.length < 3)
 		return [];
 	/*
-	 * 图像坐标 → 世界坐标。实测（case/example_2018.dwg，与用户提供的 CAD 截图逐格
-	 * 比对）：遮罩边界点的 x 与 uPixel 方向相反，不取反整块遮罩会左右镜像
-	 * （用户反馈「AcDbWipeout 左右镜像了」且已排除全局镜像）。v 方向无需翻转。
+	 * 图像坐标 → 世界坐标：世界 = position + uPixel·(nx·sx) + vPixel·(ny·sy)。
+	 *
+	 * 但边界点的 x 与 uPixel 方向**相反**——不处理整块遮罩会左右镜像（用户确认
+	 * 「只有 AcDbWipeout 左右镜像」且已排除全局镜像）。注意**不能直接把 uPixel
+	 * 取反**：那等于绕 position 做镜像，遮罩会整体跑到另一侧（用户反馈
+	 * 「AcDbWipeout 的位置反了」）。正确做法是**原地镜像**——以边界点自身的 x
+	 * 中点为中心翻转，遮罩所占范围不动、内部形状左右翻正（与用户 CAD/导入截图
+	 * 逐格比对一致）。v 方向无需翻转。
 	 */
-	const uRaw = e.uPixel ?? { x: 1, y: 0 };
-	const u = { x: -uRaw.x, y: -uRaw.y };
+	const u = e.uPixel ?? { x: 1, y: 0 };
 	const v = e.vPixel ?? { x: 0, y: 1 };
 	const sx = e.imageSize?.x ?? 1;
 	const sy = e.imageSize?.y ?? 1;
-	// uPixel/vPixel 可能已被解析库缩放成单位向量，长度过小时按 imageSize 反推
+	const xs = path.map(p => p.x).filter(v2 => Number.isFinite(v2));
+	if (xs.length === 0)
+		return [];
+	const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
 	const out: DwgPoint[] = [];
 	for (const p of path) {
 		if (!Number.isFinite(p.x) || !Number.isFinite(p.y))
 			continue;
+		const nx = 2 * midX - p.x;
 		out.push({
-			x: pos.x + u.x * p.x * sx + v.x * p.y * sy,
-			y: pos.y + u.y * p.x * sx + v.y * p.y * sy,
+			x: pos.x + u.x * nx * sx + v.x * p.y * sy,
+			y: pos.y + u.y * nx * sx + v.y * p.y * sy,
 		});
 	}
 	return out;
@@ -1142,8 +1154,7 @@ function collectBlockAttrTags(
 			if (/^ATTDEF$/i.test(anyE.type ?? '') && typeof anyE.tag === 'string' && anyE.tag.length > 0)
 				tags.push(anyE.tag);
 		}
-		if (tags.length > 0)
-			ctx.blockAttrTags.push({ name: b.name, tags });
+		ctx.blockAttrTags.push({ name: b.name, tags });
 	}
 }
 
@@ -1190,4 +1201,51 @@ function assignInsertBlocks(
 		const key = 'INSERT(块名未读出，解析库限制)';
 		ctx.skipped.set(key, (ctx.skipped.get(key) ?? 0) + unresolved);
 	}
+}
+
+/**
+ * 无名块引用的「唯一候选块」自动认领。
+ *
+ * 背景：重存过的图纸里 INSERT 的块名会被解析库读成空串，而库的底层取块名 API
+ * （dwg_entity_get_block_name / dynapi）实测对任何指针都返回
+ * Invalid object pointer passed!，自带 DXF 写出器也报 error code: 1——拿不到权威块名。
+ *
+ * 判定规则（确定性，不是猜）：先跑可靠匹配（属性标记命中 bloko、标注按位置邻近命中
+ * 匿名标注块），此后若只剩唯一一个非匿名候选块（排除布局块、外部参照、* 开头匿名块
+ * 与已被认领者），则把其余无名 INSERT 全部交给它；有多个候选时不认领，只计入警告。
+ * 判定依据写进解析警告，用户可核对、可推翻。
+ */
+function autoAssignRemainingInserts(
+	entities: unknown,
+	ctx: ToRawContext,
+): void {
+	if (!Array.isArray(entities))
+		return;
+	const list = entities as Array<{ type?: string; name?: string }>;
+	const named = new Set<string>();
+	for (const e of list) {
+		if (e.type === 'INSERT' && typeof e.name === 'string' && e.name.length > 0)
+			named.add(e.name);
+	}
+	// 候选：非 * 开头（匿名块不会被普通 INSERT 引用）且尚未被任何 INSERT 认领
+	const candidates = ctx.blockAttrTags.filter(b => !b.name.startsWith('*') && !named.has(b.name));
+	const pending = list.filter(e => e.type === 'INSERT' && !e.name);
+	const KEY = 'INSERT(块名未读出，解析库限制)';
+	if (pending.length === 0) {
+		ctx.skipped.delete(KEY);
+		return;
+	}
+	if (candidates.length !== 1) {
+		// 多个候选（或没有候选）时不做任何推断，只保留警告计数
+		ctx.skipped.set(KEY, pending.length);
+		return;
+	}
+	const target = candidates[0]!.name;
+	for (const e of pending)
+		e.name = target;
+	ctx.skipped.delete(KEY);
+	ctx.notes.push(
+		`已自动把 ${pending.length} 个读不出块名的块引用按唯一候选图块「${target}」展开`
+		+ '（解析库未提供块名；判定依据是可靠匹配后仅剩这一个非匿名候选块，如与预期不符请反馈）',
+	);
 }
