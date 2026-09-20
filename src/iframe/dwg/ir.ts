@@ -205,6 +205,77 @@ export function detectUnits(insunits: number | undefined, warnings?: string[]): 
 	}
 }
 
+/** 常见 PCB 尺寸区间（mm）：比这更小不像板子，比这更大也基本不是 PCB。 */
+const PCB_MIN_EXTENT_MM = 5;
+const PCB_MAX_EXTENT_MM = 1000;
+
+/** 各单位相对 mm 的换算系数。 */
+const UNIT_TO_MM: Record<DwgUnit, number> = {
+	mm: 1,
+	cm: 10,
+	m: 1000,
+	inch: 25.4,
+	mil: 0.0254,
+	ft: 304.8,
+	unknown: 1,
+};
+
+/** 「自动」档位的候选单位（按换算系数升序）。 */
+const AUTO_UNIT_CANDIDATES: DwgUnit[] = ['mil', 'mm', 'cm', 'inch', 'm'];
+
+/**
+ * 按图纸**实际尺寸**修正单位（用户反馈：「导入单位需要自动根据 dwg 尺寸识别
+ * 用什么单位最合适，PCB 尺寸不会非常大」）。
+ *
+ * 背景：机械图纸常声明 mm 但坐标上万（实测 case/example_2018.dwg 为
+ * 14299×15600，INSUNITS=4mm）——照声明导入就是 14.3m×15.6m 的板子。
+ * 规则：先信图纸声明；只有当换算后的最大边长落在常见 PCB 区间之外时，
+ * 才在候选单位里挑一个（先满足尺寸区间，其次尽量少改单位），并写明确告警。
+ * 用户手选单位时不走这里（手选即最终结果）。
+ */
+export function detectBestUnit(
+	declared: DwgUnit,
+	extent?: { width: number; height: number },
+	warnings?: string[],
+): DwgUnit {
+	if (!extent)
+		return declared;
+	const span = Math.max(Math.abs(extent.width), Math.abs(extent.height));
+	if (!(span > 0))
+		return declared;
+	const declaredFactor = UNIT_TO_MM[declared] ?? 1;
+	const declaredMm = span * declaredFactor;
+	if (declaredMm >= PCB_MIN_EXTENT_MM && declaredMm <= PCB_MAX_EXTENT_MM)
+		return declared;
+
+	let best: { unit: DwgUnit; score: number } | null = null;
+	for (const unit of AUTO_UNIT_CANDIDATES) {
+		const sizeMm = span * UNIT_TO_MM[unit]!;
+		// 落在区间内记 0，否则按偏离倍数取对数（越离谱罚得越狠）。
+		const penalty = sizeMm < PCB_MIN_EXTENT_MM
+			? Math.log(PCB_MIN_EXTENT_MM / sizeMm)
+			: sizeMm > PCB_MAX_EXTENT_MM
+				? Math.log(sizeMm / PCB_MAX_EXTENT_MM)
+				: 0;
+		// 变更代价：与图纸声明单位的比例（同样合格时优先少改）。
+		const change = Math.abs(Math.log(UNIT_TO_MM[unit]! / declaredFactor));
+		const score = penalty * 100 + change;
+		if (!best || score < best.score)
+			best = { unit, score };
+	}
+	if (!best || best.unit === declared)
+		return declared;
+
+	const round = (v: number): number => Math.round(v * 10) / 10;
+	warnings?.push(
+		`图纸声明单位为 ${declared}，但按该单位解释后尺寸为 ${round(declaredMm)}mm`
+		+ `（远超/远小于常见 PCB 尺寸 ${PCB_MIN_EXTENT_MM}~${PCB_MAX_EXTENT_MM}mm），`
+		+ `已自动改用 ${best.unit}（约 ${round(span * UNIT_TO_MM[best.unit]!)}mm）。`
+		+ `如与预期不符，请在「导入单位」里手动指定。`,
+	);
+	return best.unit;
+}
+
 /** 从 libredwg 输出组装 IR。 */
 export function buildIR(opts: {
 	units: DwgUnit;

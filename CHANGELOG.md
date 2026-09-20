@@ -200,6 +200,16 @@
     3DSOLID × 1、TOLERANCE × 1、MULTILEADER × 1、MLINE × 1）。
     **硬限制说明**：面域（REGION）与三维实体（3DSOLID / BODY）在解析库里只有 ACIS 数据
     （`satCache`），拿不到二维几何，无法导入；此类差异现在会明确列出而不是悄悄消失。
+
+20. **属性文字（ATTDEF / ATTRIB）没有导入**：图块的属性值此前整体跳过，`valoro de la teksto en bloko`、`ETIKEDO` 这类文字全部丢失。实测 libredwg-web 把可见文本放在嵌套的 `e.text` 对象里（值是 `e.text.text`，位置/字高/旋转在 `e.text.startPoint`/`textHeight`/`rotation`），而实体自身的 `insertionPoint` 恒为 `(0,0)`——照它导入会把属性文字全堆到原点。现在按嵌套记录导入为文本；块内的 ATTDEF/ATTRIB 只是模板（真正显示的是 INSERT 的属性值）故跳过，避免同位置渲染两遍。注意：ATTDEF 的**定义值** libredwg-web 不暴露，无值且位于原点的纯模板会被跳过，其余退回显示标记（tag）。
+
+21. **样条曲线被强行首尾相连**：有图纸把样条的闭合标志位置位，但首末点实际相距数百单位（实测 `case/example_2018.dwg` 两条拟合点样条相距 290 / 1700 单位），按标志闭合会凭空补一条横贯图纸的弦。现在要求标志与几何自洽——只有周期样条或首末点实际重合（容差取曲线自身尺度的 1e-6）才按闭合导入。
+
+22. **「自动」单位不看图纸尺寸**：机械图纸常声明 mm 却把坐标画到上万（实测该图纸 14299×15600，INSUNITS=4mm），照声明导入得到 14.3m×15.6m 的板子。现在「自动」档在声明单位换算后超出常见 PCB 尺寸（5~1000mm）时，会自动改用最合适的单位（该图纸判为 mil，约 363×396mm），并在解析警告里写明判定依据与手动指定入口。
+
+23. **多线引线（MULTILEADER / AcDbMLeader）没有导入**：引线与文字整体被跳过。实测 libredwg-web 把引线顶点放在 `leaderSections[].leaderLines[].vertices`、文字放在 `textContent`（含换行与格式码）、锚点在 `planeOrigin`，现已导入为「引线折线 + 文字」；因一条 MLeader 要产出两个图元，`toRaw` 的返回类型放宽为「实体或实体数组」。
+24. **块名为空时的兜底匹配**：重存过的图纸里 INSERT 的块名会被解析库读成空串（实测 9 个 INSERT 全为 `""`，无 `blockRecordHandle` 可回退）。现在只做可靠匹配——INSERT 带属性且某个块的 ATTDEF 标记能唯一命中时才认领（本次救回 `bloko`）；匹配不上的**不猜**，按类型计入解析警告。
+
 ## 1.1.0
 
 修复「选择 DWG 文件后始终提示解析失败」的问题。

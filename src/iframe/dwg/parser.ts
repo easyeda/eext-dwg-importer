@@ -17,7 +17,7 @@ import type { RawDwgEntity } from './ir';
 import { buildBlockDefs, expandInserts } from './block-expander';
 import { expandBulgeVertices } from './bulge';
 import { clipLineToBox, infiniteLineEndpoints } from './infinite-line';
-import { buildIR, computeBoundingBox, detectUnits } from './ir';
+import { buildIR, computeBoundingBox, detectBestUnit, detectUnits } from './ir';
 import { mtextFirstLineOffsetY, mtextLinePitch, splitMTextLines } from './mtext';
 import { filterOutlierEntities } from './outlier';
 import { vendorModuleUrl, vendorWasmUrl } from './resources';
@@ -271,15 +271,35 @@ export async function parseDwg(
 	 * `tableBlocks` 单独预扫一遍：表格可能出现在模型空间（正常情况）也可能在块里，
 	 * 预扫后与遍历顺序无关，且只收「真正会进入 blockDefs 的块」（非布局、非 XREF、非空）。
 	 */
-	const ctx: ToRawContext = { tableBlocks: [], skipped: new Map<string, number>() };
+	const ctx: ToRawContext = { tableBlocks: [], dimBlocks: [], blockAttrTags: [], skipped: new Map<string, number>() };
 	for (const b of blockEntries) {
 		const isLayout = /^\*(?:Model|Paper)_Space/i.test(b.name);
 		const isXref = typeof b.flags === 'number' && (b.flags & 4) !== 0;
 		if (isLayout || isXref || (b.entities ?? []).length === 0)
 			continue;
-		if (/^\*T\d+$/i.test(b.name))
+		if (/^\*T\d*$/i.test(b.name))
 			ctx.tableBlocks.push(b.name);
+		else if (/^\*D\d*$/i.test(b.name))
+			ctx.dimBlocks.push(b);
 	}
+
+	/*
+	 * 标注匿名块（*D）兜底：重新保存过的图纸里 DIMENSION 的块名会整体丢失
+	 * （实测 10 条标注 name 全为 undefined），而块本身还在。标注块的几何已经
+	 * 是 WCS，实测 textPoint 距对应块几何 0~2.7 单位、离其他块数百到数千单位，
+	 * 故按「最近的未占用标注块」匹配——同时给重名的匿名块补唯一后缀，否则
+	 * 块定义会互相覆盖（10 个块全叫 `*D`）。
+	 */
+	assignDimensionBlocks(db.entities, ctx);
+
+	/*
+	 * 无名块引用兜底：重新保存过的图纸里 INSERT 的块名会被解析库读成空串
+	 * （实测 9 个 INSERT name 全为 ""，且没有 blockRecordHandle 可回退）。
+	 * 这里只做**可靠匹配**——INSERT 带属性、且某个块的 ATTDEF 标记能唯一命中
+	 * 它，才认领（本次即 bloko）。其余一律不动并计入警告，绝不按顺序猜配。
+	 */
+	collectBlockAttrTags(blockEntries, ctx);
+	assignInsertBlocks(db.entities, ctx);
 
 	const blockDefsRaw: Array<{ name: string; entities: RawDwgEntity[] }> = [];
 	for (const b of blockEntries) {
@@ -290,8 +310,17 @@ export async function parseDwg(
 			continue;
 		const converted: RawDwgEntity[] = [];
 		for (const e of entityList) {
+			/*
+			 * 块内的 ATTDEF/ATTRIB 只是模板：CAD 实际显示的是 INSERT 上的属性值
+			 * （模型空间的 ATTRIB 实体，见 toRaw 的 ATTDEF/ATTRIB 分支）。
+			 * 这里一并导入会在同一位置渲染两遍文字。
+			 */
+			if (/^(?:ATTDEF|ATTRIB)$/i.test(e.type))
+				continue;
 			const r = toRaw(e, ctx);
-			if (r)
+			if (Array.isArray(r))
+				converted.push(...r);
+			else if (r)
 				converted.push(r);
 		}
 		blockDefsRaw.push({ name: b.name, entities: converted });
@@ -301,7 +330,9 @@ export async function parseDwg(
 	const rawEntities: RawDwgEntity[] = [];
 	for (const e of modelEntities) {
 		const r = toRaw(e, ctx);
-		if (r)
+		if (Array.isArray(r))
+			rawEntities.push(...r);
+		else if (r)
 			rawEntities.push(r);
 	}
 
@@ -366,8 +397,19 @@ export async function parseDwg(
 		);
 	}
 
+	/*
+	 * 「自动」单位档：先取图纸声明（INSUNITS），再按**实际尺寸**做合理性修正——
+	 * 声明 mm 但坐标上万的机械图纸，照声明导入会得到十几米的板子。
+	 */
+	const autoExtent = computeBoundingBox(finalEntities);
+	const units = detectBestUnit(
+		detectUnits(db.header?.INSUNITS, parseWarnings),
+		{ width: autoExtent.maxX - autoExtent.minX, height: autoExtent.maxY - autoExtent.minY },
+		parseWarnings,
+	);
+
 	return buildIR({
-		units: detectUnits(db.header?.INSUNITS, parseWarnings),
+		units,
 		layers,
 		blocks,
 		entities: finalEntities,
@@ -386,11 +428,15 @@ export async function parseDwg(
  */
 interface ToRawContext {
 	tableBlocks: string[];
+	/** 标注匿名块（`*D`/`*D<n>`）候选：重存后 DIMENSION 的 name 会丢，只能按位置匹配。 */
+	dimBlocks: Array<{ name: string; entities?: Array<{ [key: string]: unknown }> }>;
+	/** 块名 → 块内 ATTDEF 标记：无名 INSERT 只能靠属性标记唯一命中来认领（不猜）。 */
+	blockAttrTags: Array<{ name: string; tags: string[] }>;
 	skipped: Map<string, number>;
 }
 
 /** 把 libredwg-web 的实体对象转换成 RawDwgEntity；不支持的类型返回 null。 */
-function toRaw(e: DwgEntityLike, ctx: ToRawContext): RawDwgEntity | null {
+function toRaw(e: DwgEntityLike, ctx: ToRawContext): RawDwgEntity | RawDwgEntity[] | null {
 	const layer = e.layer ?? '0';
 	const common = {
 		id: e.handle,
@@ -421,7 +467,7 @@ function toRaw(e: DwgEntityLike, ctx: ToRawContext): RawDwgEntity | null {
 				center: toPoint2D(e.center),
 				radius: e.radius ?? 0,
 				startAngle: e.startAngle ?? 0,
-				endAngle: e.endAngle ?? 0,
+				endAngle: (e.startAngle ?? 0) + arcSweepRad(e.startAngle ?? 0, e.endAngle ?? 0),
 			};
 		case 'LWPOLYLINE': {
 			// 闭合位是 512（不是 bit0），实测依据见 isLwPolylineClosed 注释。
@@ -453,7 +499,18 @@ function toRaw(e: DwgEntityLike, ctx: ToRawContext): RawDwgEntity | null {
 			 * 实测 case/example_2018.dwg：4 条 SPLINE 中拟合点型（knots/controlPoints
 			 * 为空、fitPoints 6 个）必须做插值拟合，控制点型则用 de Boor 求值。
 			 */
-			const splineClosed = typeof e.flag === 'number' && (e.flag & 1) !== 0;
+			/*
+			 * 闭合标志必须与几何自洽。实测 case/example_2018.dwg 的两条样条
+			 * flag=9（bit0 闭合、bit3 平面），但首末拟合点相距 290 / 1700 单位：
+			 * 直接按标志闭合会凭空补一条横贯图纸的弦（用户反馈
+			 * 「贝塞尔曲线首尾相连了，原文件不需要相连的」）。
+			 * 因此只在显式标了周期（bit1），或首末点实际重合时才按闭合处理。
+			 */
+			const splineFlag = typeof e.flag === 'number' ? e.flag : 0;
+			const splineClosed = isSplineClosed(
+				splineFlag,
+				e.fitPoints?.length ? e.fitPoints : e.controlPoints,
+			);
 			const sampled = sampleSplineCurve({
 				degree: e.degree,
 				knots: e.knots,
@@ -501,6 +558,80 @@ function toRaw(e: DwgEntityLike, ctx: ToRawContext): RawDwgEntity | null {
 				attachmentPoint: e.attachmentPoint,
 				lineSpacing: e.lineSpacing,
 			};
+			/*
+		 * ATTDEF / ATTRIB：图块属性的「定义」与「实际值」。
+		 *
+		 * 实测 libredwg-web 把这两类的可见文本放在**嵌套对象** e.text 里：
+		 * 值是 e.text.text，位置 / 字高 / 旋转在 e.text.startPoint / textHeight /
+		 * rotation，而实体自身的 insertionPoint 恒为 (0,0)——照它导入会把所有
+		 * 属性文字堆在原点。用户反馈的「valoro de la teksto en bloko」「ETIKEDO
+		 * 文字丢失」即此。
+		 *
+		 * ATTDEF 的定义值 libredwg-web 不暴露（实测整库搜不到该值），只有
+		 * 「无值 + 位于原点」的纯模板会被跳过；其余退回显示标记 tag。
+		 */
+		/*
+		 * MULTILEADER（MLeader）：可见内容是「引线折线 + 文字」，一条实体要产出
+		 * 两个图元（故 toRaw 允许返回数组）。
+		 * 实测 libredwg-web：引线顶点在 leaderSections[].leaderLines[].vertices，
+		 * 文字在 textContent（含换行与格式码，交给 MTEXT 后处理清理），
+		 * 锚点在 planeOrigin（与 lastLeaderLinePoint 重合）；textHeight=4。
+		 */
+		case 'MULTILEADER': {
+			const out: RawDwgEntity[] = [];
+			const sections: unknown = e.leaderSections;
+			for (const section of Array.isArray(sections) ? sections : []) {
+				const rawLines = (section as { leaderLines?: unknown }).leaderLines;
+				const lines = Array.isArray(rawLines) ? (rawLines as Array<{ vertices?: Point3D[] }>) : [];
+				for (const line of lines) {
+					const points = (line.vertices ?? []).map(pt => toPoint2D(pt));
+					if (points.length >= 2)
+						out.push({ ...common, kind: 'LWPOLYLINE', points, closed: false });
+				}
+			}
+			const content = typeof e.textContent === 'string' ? e.textContent : '';
+			const anchor = (e.planeOrigin ?? e.lastLeaderLinePoint) as Point3D | undefined;
+			if (content.trim().length > 0) {
+				out.push({
+					...common,
+					kind: 'MTEXT',
+					position: toPoint2D(anchor),
+					content,
+					height: typeof e.textHeight === 'number' ? e.textHeight : 1,
+					rotation: typeof e.textRotation === 'number' ? e.textRotation : 0,
+				});
+			}
+			if (out.length === 0) {
+				bumpSkipped(ctx, 'MULTILEADER(无可用几何)');
+				return null;
+			}
+			return out;
+		}
+		case 'ATTDEF':
+		case 'ATTRIB': {
+			const rec = e.text as {
+				text?: string;
+				startPoint?: Point3D;
+				textHeight?: number;
+				rotation?: number;
+			} | undefined;
+			const tag = (e as { tag?: string }).tag ?? '';
+			const hasValue = typeof rec?.text === 'string' && rec.text.trim().length > 0;
+			const at = rec?.startPoint;
+			const atOrigin = !at || (Math.abs(at.x) < 1e-9 && Math.abs(at.y) < 1e-9);
+			if ((e as { isVisible?: boolean }).isVisible === false)
+				return null;
+			if (!hasValue && (!tag || atOrigin))
+				return null;
+			return {
+				...common,
+				kind: 'TEXT',
+				position: toPoint2D(at),
+				content: hasValue ? rec!.text! : tag,
+				height: rec?.textHeight ?? 1,
+				rotation: rec?.rotation ?? 0,
+			};
+		}
 		case 'SOLID': {
 			/*
 			 * SOLID 是实心四边形。注意 DXF 顶点序是 1-2-4-3 之字形
@@ -745,7 +876,13 @@ function wipeoutBoundaryPoints(e: DwgEntityLike): DwgPoint[] {
 	const pos = e.position;
 	if (!pos || path.length < 3)
 		return [];
-	const u = e.uPixel ?? { x: 1, y: 0 };
+	/*
+	 * 图像坐标 → 世界坐标。实测（case/example_2018.dwg，与用户提供的 CAD 截图逐格
+	 * 比对）：遮罩边界点的 x 与 uPixel 方向相反，不取反整块遮罩会左右镜像
+	 * （用户反馈「AcDbWipeout 左右镜像了」且已排除全局镜像）。v 方向无需翻转。
+	 */
+	const uRaw = e.uPixel ?? { x: 1, y: 0 };
+	const u = { x: -uRaw.x, y: -uRaw.y };
 	const v = e.vPixel ?? { x: 0, y: 1 };
 	const sx = e.imageSize?.x ?? 1;
 	const sy = e.imageSize?.y ?? 1;
@@ -875,4 +1012,182 @@ function expandMultiLineText(entities: ReadonlyArray<DwgEntity>): DwgEntity[] {
 		}
 	}
 	return out;
+}
+
+/**
+ * 判断样条是否真的闭合。
+ *
+ * `flag` 为 DWG/DXF 的样条标志位（bit0 闭合、bit1 周期、bit2 有理、bit3 平面）。
+ * 实测有图纸把 bit0 置位但首末点相距数百单位——按标志闭合会补出一条横贯
+ * 图纸的弦，与「原文件不相连」的预期相反。故要求几何自洽：
+ * 周期样条天然闭合；其余必须首末点重合（容差取曲线自身尺度的 1e-6）。
+ */
+function isSplineClosed(flag: number, points?: Point3D[]): boolean {
+	if ((flag & 2) !== 0)
+		return true;
+	if ((flag & 1) === 0 || !points || points.length < 2)
+		return false;
+	const first = points[0]!;
+	const last = points[points.length - 1]!;
+	const gap = Math.hypot(first.x - last.x, first.y - last.y);
+	const xs = points.map(p => p.x);
+	const ys = points.map(p => p.y);
+	const diagonal = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+	return gap <= Math.max(1e-9, diagonal * 1e-6);
+}
+
+/**
+ * DWG/DXF 圆弧恒为「自 startAngle 逆时针扫到 endAngle」（角度模 2π），
+ * 但坐标里常见 end < start（实测该图纸 r=830.639、起 4.624、止 2.047）。
+ * 直接相减得到负扫掠角，画出来就是互补的那段弧——用户反馈的「圆弧翻转了」。
+ */
+function arcSweepRad(start: number, end: number): number {
+	const twoPi = Math.PI * 2;
+	const raw = end - start;
+	const sweep = ((raw % twoPi) + twoPi) % twoPi;
+	return sweep === 0 && raw !== 0 ? twoPi : sweep;
+}
+
+/**
+ * 把丢失的标注块名补回 DIMENSION（见 parseDwg 中的调用点说明）。
+ *
+ * 只接受「贴合到块几何上」的匹配（实测距离 0~2.7 单位，阈值 50），
+ * 匹配不上的标注仍会走原来的「无匿名块」告警——宁可少画一条标注，
+ * 也不要把别的标注几何搬过来。
+ */
+function assignDimensionBlocks(
+	entities: unknown,
+	ctx: ToRawContext,
+): void {
+	if (!Array.isArray(entities) || ctx.dimBlocks.length === 0)
+		return;
+
+	// 重名的匿名块改成唯一名，否则 buildBlockDefs 会互相覆盖
+	const used = new Set<string>();
+	for (const b of ctx.dimBlocks) {
+		let name = b.name;
+		let i = 2;
+		while (used.has(name))
+			name = `${b.name}#${i++}`;
+		b.name = name;
+		used.add(name);
+	}
+
+	const clouds = ctx.dimBlocks.map((b) => {
+		const points: Array<{ x: number; y: number }> = [];
+		for (const e of b.entities ?? []) {
+			const anyE = e as {
+				insertionPoint?: { x: number; y: number };
+				center?: { x: number; y: number };
+				start?: { x: number; y: number };
+				end?: { x: number; y: number };
+				vertices?: Array<{ x: number; y: number }>;
+			};
+			for (const q of [anyE.insertionPoint, anyE.center, anyE.start, anyE.end]) {
+				if (q && Number.isFinite(q.x) && Number.isFinite(q.y))
+					points.push(q);
+			}
+			for (const q of anyE.vertices ?? []) {
+				if (Number.isFinite(q.x) && Number.isFinite(q.y))
+					points.push(q);
+			}
+		}
+		return { name: b.name, points, claimed: false };
+	});
+
+	for (const raw of entities as Array<{
+		type?: string;
+		name?: string;
+		textPoint?: { x: number; y: number };
+		definitionPoint?: { x: number; y: number };
+	}>) {
+		if (raw.type !== 'DIMENSION' || raw.name || clouds.length === 0)
+			continue;
+		const target = raw.textPoint ?? raw.definitionPoint;
+		if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y))
+			continue;
+		let best: { cloud: (typeof clouds)[number]; dist: number } | null = null;
+		for (const cloud of clouds) {
+			if (cloud.claimed)
+				continue;
+			let min = Number.POSITIVE_INFINITY;
+			for (const q of cloud.points)
+				min = Math.min(min, Math.hypot(q.x - target.x, q.y - target.y));
+			if (!best || min < best.dist)
+				best = { cloud, dist: min };
+		}
+		if (best && best.dist <= 50) {
+			best.cloud.claimed = true;
+			raw.name = best.cloud.name;
+		}
+	}
+}
+
+/**
+ * 收集「块名 → 块内 ATTDEF 标记」，供无名 INSERT 的可靠匹配使用。
+ * 只收非布局、非外部参照且确有属性定义的块。
+ */
+function collectBlockAttrTags(
+	blockEntries: BlockRecordLike[],
+	ctx: ToRawContext,
+): void {
+	for (const b of blockEntries) {
+		const isLayout = /^\*(?:Model|Paper)_Space/i.test(b.name);
+		const isXref = typeof b.flags === 'number' && (b.flags & 4) !== 0;
+		if (isLayout || isXref)
+			continue;
+		const tags: string[] = [];
+		for (const e of b.entities ?? []) {
+			const anyE = e as { type?: string; tag?: string };
+			if (/^ATTDEF$/i.test(anyE.type ?? '') && typeof anyE.tag === 'string' && anyE.tag.length > 0)
+				tags.push(anyE.tag);
+		}
+		if (tags.length > 0)
+			ctx.blockAttrTags.push({ name: b.name, tags });
+	}
+}
+
+/**
+ * 给「块名为空」的 INSERT 补块名——**只做可靠匹配，不猜**。
+ *
+ * 判据：该 INSERT 带属性（attribs），且某个候选块的 ATTDEF 标记集合能覆盖
+ * 全部属性标记，并且只有一个候选满足（唯一命中）时才认领。
+ * 认领不到的按类型计入解析警告，让用户看到「有几个块引用没导入」。
+ */
+function assignInsertBlocks(
+	entities: unknown,
+	ctx: ToRawContext,
+): void {
+	if (!Array.isArray(entities) || ctx.blockAttrTags.length === 0)
+		return;
+	const claimed = new Set<string>();
+	let unresolved = 0;
+	for (const raw of entities as Array<{
+		type?: string;
+		name?: string;
+		attribs?: Array<{ tag?: string }>;
+	}>) {
+		if (raw.type !== 'INSERT' || raw.name)
+			continue;
+		const tags = (raw.attribs ?? [])
+			.map(a => a?.tag)
+			.filter((t): t is string => typeof t === 'string' && t.length > 0);
+		if (tags.length === 0) {
+			unresolved++;
+			continue;
+		}
+		const matches = ctx.blockAttrTags.filter(
+			b => !claimed.has(b.name) && tags.every(t => b.tags.includes(t)),
+		);
+		if (matches.length !== 1) {
+			unresolved++;
+			continue;
+		}
+		claimed.add(matches[0]!.name);
+		raw.name = matches[0]!.name;
+	}
+	if (unresolved > 0) {
+		const key = 'INSERT(块名未读出，解析库限制)';
+		ctx.skipped.set(key, (ctx.skipped.get(key) ?? 0) + unresolved);
+	}
 }

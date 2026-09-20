@@ -144,8 +144,12 @@ export function wrapTextLine(line: string, width: number, height: number): strin
 export function splitMTextLines(text: string, height: number, rectWidth?: number): string[] {
 	if (typeof text !== 'string' || text.length === 0)
 		return [];
-	// `\P`（大小写不敏感）是硬换行；`\X` 也按换行处理；此外库有时给真实换行
-	const paragraphs = text.split(/\\[PX]|\r\n|\n|\r/i);
+	/*
+	 * 只有大写 `\P` / `\X` 是硬换行；小写 `\p...;`（如 `\pxt1;`）是段落属性组。
+	 * 原先带 i 标志会把小写一起拆开——实测 MLeader 文字 `xx\P\pxt1;xx` 被拆成
+	 * 4 条（多出空行与 `xt1;xx`）；属性组交给 cleanMTextLine 清理。此外库有时给真实换行。
+	 */
+	const paragraphs = text.split(/\\[PX]|\r\n|\n|\r/);
 	const lines: string[] = [];
 	for (const p of paragraphs) {
 		const cleaned = cleanMTextLine(p);
