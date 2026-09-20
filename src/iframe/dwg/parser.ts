@@ -883,29 +883,26 @@ function wipeoutBoundaryPoints(e: DwgEntityLike): DwgPoint[] {
 	/*
 	 * 图像坐标 → 世界坐标：世界 = position + uPixel·(nx·sx) + vPixel·(ny·sy)。
 	 *
-	 * 但边界点的 x 与 uPixel 方向**相反**——不处理整块遮罩会左右镜像（用户确认
-	 * 「只有 AcDbWipeout 左右镜像」且已排除全局镜像）。注意**不能直接把 uPixel
-	 * 取反**：那等于绕 position 做镜像，遮罩会整体跑到另一侧（用户反馈
-	 * 「AcDbWipeout 的位置反了」）。正确做法是**原地镜像**——以边界点自身的 x
-	 * 中点为中心翻转，遮罩所占范围不动、内部形状左右翻正（与用户 CAD/导入截图
-	 * 逐格比对一致）。v 方向无需翻转。
+	 * 这条式子是**两条独立证据**定下来的（此前按肉眼描述试过 4 种符号组合，其中 3 种都错）：
+	 *   证据 1（CAD 导出的 DXF 真值 case/example_2018.dxf）：WIPEOUT 的插入点、U 矢量、
+	 *     V 矢量、图像大小与我们读到的完全一致；裁剪边界顶点（DXF 组码 14/24）与 libredwg
+	 *     的 clippingBoundaryPath 逐点相同——说明 libredwg 没做任何归一化，只是丢掉了
+	 *     闭合用的重复末点（DXF 13 点 / 我们 12 点）。
+	 *   证据 2（覆盖判据）：遮罩的用途是盖住东西，四种符号组合里只有 (u+, v+) 能覆盖其他
+	 *     图元（BF 覆盖 1 个采样点、D6 覆盖 2 个，其余组合均为 0）。
+	 * 故这里是原实现：不要再按「看起来镜像」去取反某个轴——取反必然导致镜像或偏移。
 	 */
 	const u = e.uPixel ?? { x: 1, y: 0 };
 	const v = e.vPixel ?? { x: 0, y: 1 };
 	const sx = e.imageSize?.x ?? 1;
 	const sy = e.imageSize?.y ?? 1;
-	const xs = path.map(p => p.x).filter(v2 => Number.isFinite(v2));
-	if (xs.length === 0)
-		return [];
-	const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
 	const out: DwgPoint[] = [];
 	for (const p of path) {
 		if (!Number.isFinite(p.x) || !Number.isFinite(p.y))
 			continue;
-		const nx = 2 * midX - p.x;
 		out.push({
-			x: pos.x + u.x * nx * sx + v.x * p.y * sy,
-			y: pos.y + u.y * nx * sx + v.y * p.y * sy,
+			x: pos.x + u.x * p.x * sx + v.x * p.y * sy,
+			y: pos.y + u.y * p.x * sx + v.y * p.y * sy,
 		});
 	}
 	return out;
