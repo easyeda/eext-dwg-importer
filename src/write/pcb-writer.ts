@@ -91,7 +91,7 @@ export async function applyPcbImport(
 		skipEmptyLayers: payload.options.skipEmptyLayers,
 		emptyLayers,
 		// 原点偏移（mil）：DWG (0,0) 落到画布的该坐标；旧数据缺省时视为 0。
-		offset: payload.options.originOffsetMil ?? { x: 0, y: 0 },
+		offset: await toDataOrigin(eda, payload.options.originOffsetMil ?? { x: 0, y: 0 }),
 	};
 
 	for (let i = 0; i < total; i += BATCH) {
@@ -158,7 +158,6 @@ async function writeOne(
 	 * 也是画布坐标），而图元创建 API 用的是数据原点——不换回去整张图会平移一个画布
 	 * 原点偏移。拿不到换算接口时按两原点重合处理（新建 PCB 默认就是重合的）。
 	 */
-	ctx.offset = await toDataOrigin(eda, ctx.offset);
 	const CX = (v: number): number => ctx.offset.x + dwgToMil(v, ctx.units);
 	const CY = (v: number): number => ctx.offset.y + dwgToMil(v, ctx.units);
 	const LN = (v: number): number => dwgToMil(v, ctx.units);
@@ -396,15 +395,13 @@ function circlePoints(center: { x: number; y: number }, radius: number, segments
  * 画布（业务）原点坐标 → 数据原点坐标（供图元创建 API 使用）。
  *
  * 与 canvas-pick.ts 的 toCanvasOrigin 互为一对：拾取把数据坐标换成画布坐标回填，
- * 写入再换回数据坐标。偏移为 0（两原点重合）时直接返回，省一次 API 调用。
+ * 每次导入只换算一次；(0,0) 也必须换算，因为用户可能移动过画布原点。
  * 换算接口缺失或失败时保留原值——行为与改造前一致，不阻断导入。
  */
 async function toDataOrigin(
 	eda: unknown,
 	offset: { x: number; y: number },
 ): Promise<{ x: number; y: number }> {
-	if (offset.x === 0 && offset.y === 0)
-		return offset;
 	const doc = (eda as {
 		pcb_Document?: {
 			convertCanvasOriginToDataOrigin?: (x: number, y: number) => Promise<{ x: number; y: number }>;
@@ -414,7 +411,7 @@ async function toDataOrigin(
 	if (typeof convert !== 'function')
 		return offset;
 	try {
-		const data = await convert(offset.x, offset.y);
+		const data = await convert.call(doc, offset.x, offset.y);
 		if (data && Number.isFinite(data.x) && Number.isFinite(data.y))
 			return { x: data.x, y: data.y };
 	}

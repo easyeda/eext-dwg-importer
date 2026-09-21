@@ -8,6 +8,11 @@
 
 ## 这个扩展能做什么
 
+| DWG原图 | DWG导入效果 |
+| --- | --- |
+|  ![alt text](images/image1.png)  |  ![alt text](images/image.png)  |
+
+
 - **一键导入 DWG**：在 PCB、原理图、封装三种编辑器里都能用。
 - **图层映射**：DWG 里的每个图层，可以分别指定导入到哪个 PCB 层（比如板框、丝印、机械层）。选不定时，扩展会按图层颜色和图层名自动给出建议。
 - **自动展开图块（BLOCK）**：DWG 里用图块拼出来的图形（比如标准件、反复出现的标记），导入时会展开成实际图形，不会漏。
@@ -135,20 +140,3 @@ DWG 里的字体在转换中用嘉立创EDA的默认字体显示，字形可能�
 
 ---
 
-## 给开发者
-
-构建、调试与架构说明请看：
-
-- [`docs/PRD.md`](docs/PRD.md) — 产品需求与功能设计
-- [`docs/TECH.md`](docs/TECH.md) — 技术设计（模块划分、协议、算法、ADR）
-
-常用命令：
-
-```bash
-npm install
-npm run sync:vendor   # 同步 DWG 解析引擎到 vendor/
-npm run debug         # 联调模式，推送扩展包到 EDA
-npm run build         # 打包出 .eext
-npm run lint          # 代码检查
-npm run check:license # 协议自检
-```

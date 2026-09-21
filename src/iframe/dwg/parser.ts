@@ -80,7 +80,7 @@ interface DwgEntityLike {
 	// XLINE / RAY（无限长构造线）
 	firstPoint?: Point3D;
 	unitDirection?: Point3D;
-	// WIPEOUT（遮罩）：位置 + 两个像素向量 + 归一化裁剪边界
+	// WIPEOUT（遮罩）：位置 + 两个单像素向量 + 像素裁剪边界
 	position?: Point3D;
 	uPixel?: Point3D;
 	vPixel?: Point3D;
@@ -869,40 +869,32 @@ function describeSkippedEntities(skipped: ReadonlyMap<string, number>): string |
 /**
  * WIPEOUT 的边界点 → 世界坐标闭合轮廓。
  *
- * 数据形状（实测 case/example_2018.dwg，2 个 WIPEOUT）：
- *   `position` 左上角基点 + `uPixel`/`vPixel`（**整幅图**的两个方向向量）
- *   + `imageSize`（像素数，实测 (1,1)）+ `clippingBoundaryPath`（**归一化**坐标 0..1）。
- * 故世界坐标 = position + uPixel·(nx · imageSize.x) + vPixel·(ny · imageSize.y)。
- * imageSize 缺省按 1 处理（此时归一化坐标直接被 uPixel/vPixel 缩放）。
+ * 边界是左上原点、Y 向下的像素坐标；position 是图像左下插入点，
+ * uPixel/vPixel 是单像素的世界向量。像素中心与边界之间还差半个像素。
+ * 因此 WCS = position + U·(x + 0.5) + V·(height - y - 0.5)。
+ * 依据：ezdxf ImageBase.boundary_path_wcs，与 Autodesk WIPEOUT 的单像素向量定义一致。
+ * case/example_2018.dwg 的 BF/D6 均为 1×1 图像，不能据此误判为归一化坐标。
  */
 function wipeoutBoundaryPoints(e: DwgEntityLike): DwgPoint[] {
-	const path = e.clippingBoundaryPath ?? [];
+	let path = e.clippingBoundaryPath ?? [];
 	const pos = e.position;
-	if (!pos || path.length < 3)
+	if (!pos || path.length < 2)
 		return [];
-	/*
-	 * 图像坐标 → 世界坐标：世界 = position + uPixel·(nx·sx) + vPixel·(ny·sy)。
-	 *
-	 * 这条式子是**两条独立证据**定下来的（此前按肉眼描述试过 4 种符号组合，其中 3 种都错）：
-	 *   证据 1（CAD 导出的 DXF 真值 case/example_2018.dxf）：WIPEOUT 的插入点、U 矢量、
-	 *     V 矢量、图像大小与我们读到的完全一致；裁剪边界顶点（DXF 组码 14/24）与 libredwg
-	 *     的 clippingBoundaryPath 逐点相同——说明 libredwg 没做任何归一化，只是丢掉了
-	 *     闭合用的重复末点（DXF 13 点 / 我们 12 点）。
-	 *   证据 2（覆盖判据）：遮罩的用途是盖住东西，四种符号组合里只有 (u+, v+) 能覆盖其他
-	 *     图元（BF 覆盖 1 个采样点、D6 覆盖 2 个，其余组合均为 0）。
-	 * 故这里是原实现：不要再按「看起来镜像」去取反某个轴——取反必然导致镜像或偏移。
-	 */
+	// 两个对角点是矩形裁剪边界的合法紧凑形式。
+	if (path.length === 2) {
+		const [a, b] = path as [DwgPoint, DwgPoint];
+		path = [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }];
+	}
 	const u = e.uPixel ?? { x: 1, y: 0 };
 	const v = e.vPixel ?? { x: 0, y: 1 };
-	const sx = e.imageSize?.x ?? 1;
-	const sy = e.imageSize?.y ?? 1;
+	const height = e.imageSize?.y ?? 1;
 	const out: DwgPoint[] = [];
 	for (const p of path) {
 		if (!Number.isFinite(p.x) || !Number.isFinite(p.y))
 			continue;
 		out.push({
-			x: pos.x + u.x * p.x * sx + v.x * p.y * sy,
-			y: pos.y + u.y * p.x * sx + v.y * p.y * sy,
+			x: pos.x + u.x * (p.x + 0.5) + v.x * (height - p.y - 0.5),
+			y: pos.y + u.y * (p.x + 0.5) + v.y * (height - p.y - 0.5),
 		});
 	}
 	return out;

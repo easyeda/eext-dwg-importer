@@ -3,7 +3,7 @@
 	"uuid": "dd5d79bf5dd44287817ae29f79a2e9e4",
 	"displayName": "导入 DWG",
 	"description": "在 PCB / 原理图 / 封装编辑器中直接导入 DWG 文件，支持 BLOCK 展开与图层映射",
-	"version": "1.1.2",
+	"version": "1.1.3",
 	"publisher": "EasyEDA",
 	"engines": {
 		"eda": "^3.2.0"
