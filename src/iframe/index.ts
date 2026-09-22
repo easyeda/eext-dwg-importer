@@ -123,6 +123,7 @@ function start(): void {
 
 	sm.subscribe((s) => {
 		updateImportBtn(s);
+		fileSec.setBusy(s === 'parsing' || s === 'importing' || s === 'done');
 	});
 
 	// ── 原点偏移：画布拾取 ──────────────────────────────────────
@@ -148,6 +149,8 @@ function start(): void {
 
 	// ── 文件选择 → 解析 → 智能建议 ──────────────────────────────
 	fileSec.onFileSelected(async (file) => {
+		currentIr = null;
+		fileSec.setDrawing(null);
 		sm.transition('parsing');
 		fileSec.setStatusParsing(0);
 
@@ -158,6 +161,7 @@ function start(): void {
 				maxBytes: 50 * 1024 * 1024,
 			});
 			currentIr = ir;
+			fileSec.setDrawing(ir);
 
 			// 先按名字建议，未命中再退回颜色建议。
 			const colorMap = suggestAllByColor(
@@ -312,6 +316,7 @@ function start(): void {
 	cancelBtn.addEventListener('click', () => {
 		void edaApi()?.sys_IFrame?.closeIFrame?.(IFRAME_ID);
 	});
+	window.addEventListener('pagehide', () => fileSec.destroy(), { once: true });
 }
 
 /** 读取当前文档类型；失败返回 undefined。 */

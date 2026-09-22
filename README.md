@@ -8,9 +8,9 @@
 
 ## 这个扩展能做什么
 
-| DWG原图 | DWG导入效果 |
+| 扩展界面 | DWG导入效果 |
 | --- | --- |
-|  ![alt text](images/image1.png)  |  ![alt text](images/image.png)  |
+|  ![alt text](images/image1.png)  |  ![alt text](images/image2.png)  |
 
 
 - **一键导入 DWG**：在 PCB、原理图、封装三种编辑器里都能用。

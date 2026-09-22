@@ -6,8 +6,10 @@
  * 两块 UI 分属不同卡片，DOM 上不是父子关系，无法用 need(root) 就近查找。
  */
 
+import type { DwgIR } from '../../shared/types';
 import { t } from '../../shared/i18n';
 import { need } from './dom';
+import { createDwgPreview } from './dwg-preview';
 
 /** 文件状态条的标签节点（位于右栏顶部，由 index.ts 从 main 范围查找）。 */
 export interface FileSectionLabels {
@@ -18,6 +20,8 @@ export interface FileSectionLabels {
 }
 
 export interface FileSection {
+	setDrawing: (ir: DwgIR | null) => void;
+	setBusy: (busy: boolean) => void;
 	setStatusIdle: () => void;
 	setStatusParsing: (percent: number) => void;
 	/**
@@ -41,10 +45,10 @@ export interface FileSection {
 }
 
 /**
- * @param root 挂载节点（file-section 容器，仅含拖拽区与隐藏的 file input）。
+ * @param root 文件区域：初始显示拖拽入口，解析后切换为预览画布。
  * @param labels 右栏顶部状态条的「文件名」「状态」节点。
  * @param onSelect 选中新文件时先于 onFileSelected 回调触发（可选）。
- *   原用于重置预览区；预览区移除后目前无调用方传参，保留是为了语义完整。
+ *   可用于在通知解析流程之前清理调用方状态。
  */
 export function createFileSection(
 	root: HTMLElement,
@@ -56,6 +60,18 @@ export function createFileSection(
 	const nameLabel = labels.name;
 	const statusLabel = labels.status;
 	const sizeLabel = labels.size;
+	const events = new AbortController();
+	const previewRoot = document.createElement('div');
+	previewRoot.className = 'dwg-preview';
+	previewRoot.hidden = true;
+	const preview = createDwgPreview(previewRoot);
+	const changeButton = document.createElement('button');
+	changeButton.type = 'button';
+	changeButton.className = 'btn preview-change';
+	changeButton.textContent = t('Choose another DWG');
+	previewRoot.append(changeButton);
+	root.append(previewRoot);
+	let busy = false;
 
 	/** 尺寸数字：最多两位小数并去掉尾随零（297.00 → 297，210.56 → 210.56）。 */
 	const fmtNum = (n: number): string => Number(n.toFixed(2)).toString();
@@ -74,27 +90,40 @@ export function createFileSection(
 
 	const handlers: Array<(file: File) => void> = [];
 
-	drop.addEventListener('click', () => fileInput.click());
+	drop.tabIndex = 0;
+	drop.setAttribute('role', 'button');
+	const choose = (): void => {
+		if (!busy)
+			fileInput.click();
+	};
+	drop.addEventListener('click', choose, { signal: events.signal });
+	changeButton.addEventListener('click', choose, { signal: events.signal });
+	drop.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			choose();
+		}
+	}, { signal: events.signal });
 
-	drop.addEventListener('dragover', (ev) => {
+	root.addEventListener('dragover', (ev) => {
 		ev.preventDefault();
 		drop.classList.add('is-dragover');
-	});
-	drop.addEventListener('dragleave', () => drop.classList.remove('is-dragover'));
-	drop.addEventListener('drop', (ev) => {
+	}, { signal: events.signal });
+	root.addEventListener('dragleave', () => drop.classList.remove('is-dragover'), { signal: events.signal });
+	root.addEventListener('drop', (ev) => {
 		ev.preventDefault();
 		drop.classList.remove('is-dragover');
 		const file = ev.dataTransfer?.files?.[0];
-		if (file)
+		if (file && !busy)
 			emitFile(file);
-	});
+	}, { signal: events.signal });
 
 	fileInput.addEventListener('change', () => {
 		const file = fileInput.files?.[0];
-		if (file)
+		if (file && !busy)
 			emitFile(file);
 		fileInput.value = '';
-	});
+	}, { signal: events.signal });
 
 	function emitFile(file: File): void {
 		const name = file.name;
@@ -105,6 +134,17 @@ export function createFileSection(
 	}
 
 	const section: FileSection = {
+		setDrawing(ir) {
+			drop.hidden = ir !== null;
+			previewRoot.hidden = ir === null;
+			preview.setDrawing(ir);
+		},
+		setBusy(value) {
+			busy = value;
+			changeButton.disabled = value;
+			fileInput.disabled = value;
+			drop.setAttribute('aria-disabled', String(value));
+		},
 		setStatusIdle() {
 			setLine(statusLabel, t('Status: idle'));
 			setLine(sizeLabel, '');
@@ -136,6 +176,8 @@ export function createFileSection(
 			handlers.push(cb);
 		},
 		destroy() {
+			events.abort();
+			preview.destroy();
 			handlers.length = 0;
 		},
 	};

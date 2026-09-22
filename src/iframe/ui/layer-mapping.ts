@@ -242,8 +242,8 @@ function escapeHtml(s: string): string {
 	return s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 }
 
-/** ACI 颜色 → CSS 颜色。简单近似：1..7 用调色板，其它用灰度。 */
-function aciToCss(aci: number): string {
+/** 预览与图层色块共用 ACI 调色板。0/256 的继承关系由调用方先解析。 */
+export function aciToCss(aci: number): string {
 	const palette: Record<number, string> = {
 		1: '#ff0000',
 		2: '#ffff00',
@@ -252,8 +252,25 @@ function aciToCss(aci: number): string {
 		5: '#0000ff',
 		6: '#ff00ff',
 		7: '#ffffff',
+		8: '#808080',
+		9: '#c0c0c0',
 	};
-	return palette[aci] ?? `rgb(${Math.min(255, aci * 32)}, ${Math.min(255, aci * 32)}, ${Math.min(255, aci * 32)})`;
+	if (palette[aci])
+		return palette[aci];
+	if (aci >= 250 && aci <= 255) {
+		const gray = [51, 80, 105, 130, 190, 255][aci - 250]!;
+		return `rgb(${gray}, ${gray}, ${gray})`;
+	}
+	if (aci < 10 || aci > 249)
+		return '#ffffff';
+	const hue = Math.floor((aci - 10) / 10) * 15;
+	const shade = (aci - 10) % 10;
+	const value = [255, 165, 127, 76, 38][Math.floor(shade / 2)]!;
+	const saturation = shade % 2 === 0 ? 1 : 0.5;
+	const chroma = value * saturation;
+	const mid = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
+	const rgb = [[chroma, mid, 0], [mid, chroma, 0], [0, chroma, mid], [0, mid, chroma], [mid, 0, chroma], [chroma, 0, mid]][Math.floor(hue / 60)]!;
+	return `rgb(${rgb.map(c => Math.floor(c + value - chroma)).join(', ')})`;
 }
 
 /**

@@ -151,6 +151,54 @@ body {
  * 拖拽区独占文件卡片：文件信息移到右栏顶部后，把释放出的纵向空间
  * 还给选择区（min-height 拉大，拖放目标更明显、也更容易点中）。
  */
+[hidden] {
+	display: none !important;
+}
+
+.dwg-preview {
+	position: relative;
+	height: 230px;
+	overflow: hidden;
+	border-radius: var(--radius);
+	background: #10151c;
+}
+
+.dwg-preview-canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+	cursor: grab;
+	touch-action: none;
+}
+
+.dwg-preview-canvas.is-panning {
+	cursor: grabbing;
+}
+
+.preview-toolbar {
+	position: absolute;
+	bottom: 6px;
+	left: 8px;
+	right: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	pointer-events: none;
+	color: #cbd5e1;
+	font-size: 11px;
+}
+
+.preview-toolbar .btn {
+	pointer-events: auto;
+}
+
+.preview-change {
+	position: absolute;
+	top: 6px;
+	right: 8px;
+}
+
 .dropzone {
 	border: 2px dashed var(--border);
 	border-radius: var(--radius);

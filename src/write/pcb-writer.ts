@@ -41,7 +41,7 @@ import type {
 	LayerMapping,
 } from '../shared/types';
 import { arcSegmentsForSweep } from '../shared/curve';
-import { edaApi, isPcbSignalLayer } from '../shared/eda-api';
+import { edaApi, isPcbSignalLayer, LAYER } from '../shared/eda-api';
 import { dwgToMil, radToDeg } from '../shared/units';
 import { countCreated, pushError } from './apply-result';
 
@@ -61,6 +61,14 @@ const ARC_TOL_RATIO = 0.02;
 const MAX_ARC_SEGMENTS = 64;
 /** 官方示例使用的默认字体名。 */
 const DEFAULT_FONT = 'default';
+/** EDA 底面文字会自动镜像；导入二维 CAD 时抵消它，保持文字与轮廓的正视方向一致。 */
+const BOTTOM_TEXT_LAYERS = new Set<number>([
+	LAYER.BOTTOM,
+	LAYER.BOTTOM_SILKSCREEN,
+	LAYER.BOTTOM_SOLDER_MASK,
+	LAYER.BOTTOM_PASTE_MASK,
+	LAYER.BOTTOM_ASSEMBLY,
+]);
 
 export async function applyPcbImport(
 	payload: ApplyImportPayload,
@@ -335,7 +343,7 @@ async function writeOne(
 					radToDeg(e.rotation),
 					false,
 					0,
-					false,
+					BOTTOM_TEXT_LAYERS.has(targetLayer),
 					false,
 				);
 				countCreated(result, e, created);
